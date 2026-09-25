@@ -21,13 +21,13 @@
   const createChallenge = async (verifier) => base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const exchangeCode = async (code) => {
     const verifier = sessionStorage.getItem('wrk_supabase_pkce_verifier');
-    if (!verifier) return null;
+    if (!verifier) { console.error('Supabase PKCE verifier missing'); return null; }
     const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
       method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ auth_code: code, code_verifier: verifier })
     });
     sessionStorage.removeItem('wrk_supabase_pkce_verifier');
-    if (!response.ok) return null;
+    if (!response.ok) { console.error('Supabase PKCE exchange failed', response.status, await response.text()); return null; }
     return writeSession(await response.json());
   };
   const writeSession = (session) => {
