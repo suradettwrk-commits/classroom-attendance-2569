@@ -3,11 +3,11 @@ import { createRemoteJWKSet, jwtVerify } from "npm:jose";
 const PROJECT_ID = "classroom-attendance-2569";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("MIGRATION_SERVICE_ROLE_KEY")!;
-const ALLOWED_ORIGIN = Deno.env.get("APP_ORIGIN") || "https://suradettwrk-commits.github.io";
+const ALLOWED_ORIGINS = new Set(["https://classroom-attendance-2569.web.app", "https://suradettwrk-commits.github.io", Deno.env.get("APP_ORIGIN") || ""].filter(Boolean));
 const FIREBASE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
 const ADMIN_EMAIL = "suradet.t@wrk.ac.th";
-const cors = { "Access-Control-Allow-Origin": ALLOWED_ORIGIN, "Access-Control-Allow-Headers": "authorization, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Vary": "Origin" };
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+const corsFor = (request: Request) => ({ "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(request.headers.get("origin") || "") ? (request.headers.get("origin") || "") : "https://classroom-attendance-2569.web.app", "Access-Control-Allow-Headers": "authorization, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Vary": "Origin" });
+const json = (body: unknown, status = 200, request?: Request) => new Response(JSON.stringify(body), { status, headers: { ...corsFor(request || new Request("https://localhost")), "Content-Type": "application/json" } });
 const enc = (v: unknown) => encodeURIComponent(String(v ?? ""));
 const text = (v: unknown) => String(v ?? "").trim();
 const api = async (path: string, init: RequestInit = {}) => {
@@ -16,6 +16,37 @@ const api = async (path: string, init: RequestInit = {}) => {
   if (!response.ok) throw new Error(`${response.status}: ${body}`);
   return body ? JSON.parse(body) : [];
 };
+const rows = async (table: string, select = "*") => api(`${table}?select=${select}`);
+const activeTermRow = (terms: any[]) => terms.find((t) => text(t.status).toLowerCase() === "active") || terms[0];
+const uiStudent = (s: any, term: any) => ({ id:s.student_id, studentId:s.student_id, no:s.student_no, prefix:s.prefix||"", first:s.first_name||"", last:s.last_name||"", firstName:s.first_name||"", lastName:s.last_name||"", name:[s.prefix,s.first_name,s.last_name].filter(Boolean).join(" "), level:s.level, room:s.room, status:s.status, term:term?.display_label||"", termId:s.term_id });
+const uiSubject = (s: any, term: any) => ({ code:s.subject_code, name:s.subject_name||"", term:term?.display_label||"", termId:s.term_id, status:s.status||"", teacher:s.teacher||"" });
+const uiAssignment = (a: any, term: any) => ({ id:a.assignment_id, assignmentId:a.assignment_id, title:a.title||"", maxScore:Number(a.max_score||0), subjectCode:a.subject_code, type:a.assignment_type||"", dueDate:a.due_date, level:a.level, room:a.room, term:term?.display_label||"", termId:a.term_id });
+const uiClass = (c: any, term: any) => ({ id:c.teacher_class_id, teacherClassId:c.teacher_class_id, termId:c.term_id, teacherId:c.teacher_id, subjectCode:c.subject_code, level:c.level, room:c.room, status:c.status||"Active", term:term?.display_label||"" });
+async function bootstrapData(auth: any) {
+  const [terms, subjects, students, assignments, classes, users] = await Promise.all([
+    rows("terms"), rows("subjects"), rows("students"), rows("assignments"), rows("teacher_classes"), auth.admin ? rows("app_users") : Promise.resolve([])
+  ]);
+  const term = activeTermRow(terms), termId = term?.term_id;
+  const activeSubjects = subjects.filter((s:any) => s.term_id === termId && text(s.status).toLowerCase() !== "inactive");
+  const activeStudents = students.filter((s:any) => s.term_id === termId);
+  const activeAssignments = assignments.filter((a:any) => a.term_id === termId);
+  const activeClasses = classes.filter((c:any) => c.term_id === termId && text(c.status).toLowerCase() !== "inactive" && (auth.admin || text(c.teacher_id) === text(auth.teacherId)));
+  const allowed = new Set(activeClasses.map((c:any) => `${c.level}|${c.room}`));
+  const scopedStudents = auth.admin ? activeStudents : activeStudents.filter((s:any) => allowed.has(`${s.level}|${s.room}`));
+  const scopedSubjects = auth.admin ? activeSubjects : activeSubjects.filter((s:any) => activeClasses.some((c:any) => c.subject_code === s.subject_code));
+  const scopedAssignments = auth.admin ? activeAssignments : activeAssignments.filter((a:any) => activeClasses.some((c:any) => c.subject_code === a.subject_code && c.level === a.level && c.room === a.room));
+  const combos = [...new Map(activeClasses.map((c:any) => [`${c.subject_code}|${c.level}|${c.room}`, {subject:c.subject_code, level:c.level, room:c.room}])).values()];
+  const data = { meta:{term:term?.display_label||"", requestedTerm:term?.display_label||"", generatedAt:Date.now(), termAssignmentCount:activeAssignments.length, counts:{students:scopedStudents.length, subjects:scopedSubjects.length, assignments:scopedAssignments.length}}, students:scopedStudents.map((s:any)=>uiStudent(s,term)), subjects:scopedSubjects.map((s:any)=>uiSubject(s,term)), assignments:scopedAssignments.map((a:any)=>uiAssignment(a,term)), users:users.map((u:any)=>({id:u.user_id,username:u.username,email:u.email,role:u.role,status:u.status})), combos, levels:[...new Set(scopedStudents.map((s:any)=>s.level).filter(Boolean))].sort(), rooms:[...new Set(scopedStudents.map((s:any)=>s.room).filter(Boolean))].sort(), teacherClasses:activeClasses.map((c:any)=>uiClass(c,term)), terms:terms.map((t:any)=>({TermID:t.term_id,CanonicalTermID:t.term_id,TermNo:t.term_no,AcademicYear:t.academic_year,Status:t.status,Label:t.display_label})) };
+  return { success:true, term:data.meta.term, levels:data.levels, rooms:data.rooms, subjects:data.subjects, combos:data.combos, teacherClasses:data.teacherClasses, studentsLite:data.students, data };
+}
+async function dashboardData(auth: any, requestedTerm: any) {
+  const [terms, students, assignments, classes, attendance] = await Promise.all([rows("terms"),rows("students"),rows("assignments"),rows("teacher_classes"),rows("attendance")]);
+  const term=activeTermRow(terms), termId=term?.term_id, scopedClasses=classes.filter((c:any)=>c.term_id===termId && (auth.admin || text(c.teacher_id)===text(auth.teacherId))), allowed=new Set(scopedClasses.map((c:any)=>`${c.level}|${c.room}`));
+  const ss=auth.admin?students.filter((s:any)=>s.term_id===termId):students.filter((s:any)=>s.term_id===termId&&allowed.has(`${s.level}|${s.room}`));
+  const aa=auth.admin?assignments.filter((a:any)=>a.term_id===termId):assignments.filter((a:any)=>a.term_id===termId&&scopedClasses.some((c:any)=>c.subject_code===a.subject_code&&c.level===a.level&&c.room===a.room));
+  const ar=attendance.filter((a:any)=>a.term_id===termId); const status=(v:any)=>text(v).toLowerCase(); const day=ar.filter((a:any)=>!requestedTerm || true); const count=(names:string[])=>day.filter((a:any)=>names.includes(status(a.status))).length;
+  return {success:true,totalStudents:ss.length,presentToday:count(["present","มา","มาเรียน"]),totalAssignments:aa.length,riskStudents:0,stats:{present:count(["present","มา","มาเรียน"]),late:count(["late","สาย"]),leave:count(["leave","ลา"]),absent:count(["absent","ขาด"])},riskList:[],classSummary:[],termSummary:{present:0,late:0,leave:0,absent:0}};
+}
 const termIdFor = async (value: unknown) => {
   const raw = text(value);
   if (/^AY\d+_T\d+$/.test(raw)) return raw;
@@ -52,9 +83,16 @@ function output(ctx: any) {
   return { success:true, data:{ term:ctx.term, termId:ctx.termId, subject:ctx.subjectCode, subjectCode:ctx.subjectCode, level:ctx.level, room:ctx.room, students:ctx.students.map((s:any)=>({id:s.student_id,studentId:s.student_id,no:s.student_no,prefix:s.prefix||"",first:s.first_name||"",last:s.last_name||"",firstName:s.first_name||"",lastName:s.last_name||"",name:[s.prefix,s.first_name,s.last_name].filter(Boolean).join(" "),level:s.level,room:s.room,status:s.status,term:ctx.term,termId:ctx.termId})), assignments:ctx.assignments.map((a:any)=>({id:a.assignment_id,assignmentId:a.assignment_id,title:a.title||"",maxScore:Number(a.max_score||0),subjectCode:a.subject_code,type:a.assignment_type||"",dueDate:a.due_date,level:a.level,room:a.room,term:ctx.term,termId:ctx.termId})), scores } };
 }
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (request.method === "OPTIONS") return new Response("ok", { headers: corsFor(request) });
   try {
-    const auth = await authenticate(request), body = await request.json(), action = text(body.action), ctx = await context(body, auth);
+    const auth = await authenticate(request), body = await request.json(), action = text(body.action);
+    if (action === "bootstrap") return json(await bootstrapData(auth));
+    if (action === "dashboard") return json(await dashboardData(auth, body.term));
+    if (action === "profile") {
+      const profiles = await api(`app_users?email=eq.${enc(text(body.email).toLowerCase())}&select=user_id,username,email,role,status&limit=1`);
+      return json({success:!!profiles[0], data:profiles[0] ? {id:profiles[0].user_id,username:profiles[0].username,email:profiles[0].email,role:profiles[0].role,status:profiles[0].status} : null});
+    }
+    const ctx = await context(body, auth);
     if (action === "load") return json(output(ctx));
     if (action !== "save") throw new Error("คำสั่งไม่ถูกต้อง");
     const students = new Set(ctx.students.map((s:any)=>s.student_id)), assignments = new Set(ctx.assignments.map((a:any)=>a.assignment_id));

@@ -1494,7 +1494,7 @@
   const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
   const originalRun = window.google?.script?.run;
   if (!originalRun) return;
-  const scoreMethods = new Set(['loadScoresGrid', 'saveScoresBatch']);
+  const supabaseMethods = new Set(['loadScoresGrid', 'saveScoresBatch', 'getInitialDropdowns', 'getInitialSystemData', 'getDashboardStats', 'getCurrentUserProfile']);
   const request = async (action, payload) => {
     const user = window.firebase?.auth?.().currentUser;
     if (!user) throw new Error('กรุณาเข้าสู่ระบบก่อนใช้งานคะแนน');
@@ -1508,9 +1508,15 @@
   const proxy = new Proxy({}, { get(_target, prop) {
     if (prop === 'withSuccessHandler') return (fn) => { success = fn; return proxy; };
     if (prop === 'withFailureHandler') return (fn) => { failure = fn; return proxy; };
-    if (scoreMethods.has(String(prop))) return (payload) => {
+    if (supabaseMethods.has(String(prop))) return (payload) => {
       const onSuccess = success, onFailure = failure; success = failure = null;
-      request(String(prop) === 'loadScoresGrid' ? 'load' : 'save', payload || {}).then((value) => onSuccess && onSuccess(value)).catch((error) => onFailure && onFailure(error));
+      const method = String(prop);
+      const action = method === 'loadScoresGrid' ? 'load' : method === 'saveScoresBatch' ? 'save' : method === 'getDashboardStats' ? 'dashboard' : method === 'getCurrentUserProfile' ? 'profile' : 'bootstrap';
+      const input = method === 'getCurrentUserProfile' ? { email: window.firebase?.auth?.().currentUser?.email || '' } : (payload || {});
+      request(action, input).then((value) => {
+        if (method === 'getInitialSystemData' && value && value.data) onSuccess && onSuccess(value);
+        else onSuccess && onSuccess(value);
+      }).catch((error) => onFailure && onFailure(error));
       return proxy;
     };
     return (...args) => {
