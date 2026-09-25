@@ -4,6 +4,7 @@
   const SUPABASE_URL = 'https://jvyxnsokfpnepshyyzpg.supabase.co';
   const PUBLIC_KEY = 'sb_publishable_oTJWgjNgk8Oe9i8kaAUaDw_sloavHyq';
   const STORAGE_KEY = 'wrk_supabase_auth_session';
+  const PKCE_KEY = 'wrk_supabase_pkce_verifier';
   let currentUser = null;
   window.__SUPABASE_AUTH_USER = null;
   window.__AUTH_EMAIL = '';
@@ -20,15 +21,26 @@
   const createVerifier = () => base64Url(crypto.getRandomValues(new Uint8Array(32)));
   const createChallenge = async (verifier) => base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const exchangeCode = async (code) => {
-    const verifier = sessionStorage.getItem('wrk_supabase_pkce_verifier');
+    // GitHub Pages performs a top-level redirect through Google. Keep a
+    // sessionStorage copy for normal tabs and a short-lived localStorage
+    // fallback for browsers/extensions that recreate the document context.
+    const verifier = sessionStorage.getItem(PKCE_KEY) || localStorage.getItem(PKCE_KEY);
     if (!verifier) { console.error('Supabase PKCE verifier missing'); return null; }
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
-      method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ auth_code: code, code_verifier: verifier })
-    });
-    sessionStorage.removeItem('wrk_supabase_pkce_verifier');
-    if (!response.ok) { console.error('Supabase PKCE exchange failed', response.status, await response.text()); return null; }
-    return writeSession(await response.json());
+    try {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+        method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auth_code: code, code_verifier: verifier })
+      });
+      const body = await response.text();
+      if (!response.ok) { console.error('Supabase PKCE exchange failed', response.status, body); return null; }
+      return writeSession(JSON.parse(body));
+    } catch (error) {
+      console.error('Supabase PKCE exchange exception', String(error));
+      return null;
+    } finally {
+      sessionStorage.removeItem(PKCE_KEY);
+      localStorage.removeItem(PKCE_KEY);
+    }
   };
   const writeSession = (session) => {
     if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -67,7 +79,8 @@
   window.supabaseSignInWithGoogle = async function () {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
     const verifier = createVerifier();
-    sessionStorage.setItem('wrk_supabase_pkce_verifier', verifier);
+    sessionStorage.setItem(PKCE_KEY, verifier);
+    localStorage.setItem(PKCE_KEY, verifier);
     const challenge = await createChallenge(verifier);
     const url = new URL(`${SUPABASE_URL}/auth/v1/authorize`);
     url.searchParams.set('provider', 'google');
