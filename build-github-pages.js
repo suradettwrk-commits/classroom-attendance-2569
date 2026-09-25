@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const root = __dirname;
 const docs = path.join(root, 'docs');
-const assetVersion = process.env.BUILD_VERSION || Date.now().toString();
+// Keep local/CI builds reproducible. Deploy jobs may provide a commit SHA for
+// cache busting; an ever-changing timestamp makes clean-build verification fail.
+const assetVersion = process.env.BUILD_VERSION || 'local';
 fs.mkdirSync(docs, { recursive: true });
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const firebaseBridge = fs.readFileSync(path.join(root, 'firebase-bridge.js'), 'utf8');

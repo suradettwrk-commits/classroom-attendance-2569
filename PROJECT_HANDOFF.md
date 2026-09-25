@@ -106,3 +106,15 @@ git status
 - Firebase ยังถือเป็นแหล่งข้อมูลจริงชั่วคราว
 - Commit ล่าสุดในเครื่องคือ `20c1fa8`
 - ต้องตรวจ remote และ deploy หลังจาก commit นี้ก่อนดำเนินการทดสอบต่อ
+
+## ระบบจัดระเบียบที่เพิ่มในรอบนี้
+
+- `PROJECT_RULES.md` เป็นกฎกลางสำหรับทุกเครื่อง
+- `skills/classroom-attendance-system/SKILL.md` เป็น workflow สำหรับ AI/ผู้พัฒนาคนถัดไป
+- `docs/architecture-and-rollout.md` กำหนด rollout และ rollback
+- `docs/crud-contract.md` กำหนดกติกา CRUD และ idempotency
+- `docs/backup-restore.md` กำหนดหลักฐาน backup/checksum/restore
+- `scripts/repository-safety-check.js` ตรวจ secret และ TermID ที่ผิดรูปแบบ
+- `.github/workflows/test.yml` ตรวจ safety, syntax และ reproducible build ก่อน merge/deploy
+- `package.json` มีคำสั่ง `check`, `build` และ `predeploy`
+- `build-github-pages.js` ใช้ build version ที่ reproducible; deploy job สามารถส่ง `BUILD_VERSION` เป็น commit SHA เพื่อ cache busting
