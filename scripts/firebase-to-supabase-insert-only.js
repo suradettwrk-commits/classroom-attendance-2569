@@ -9,8 +9,19 @@ const backupPath = process.env.FIREBASE_BACKUP_PATH;
 const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dryRun = process.env.DRY_RUN !== '0';
+const batchSize = Number(process.env.BATCH_SIZE || 250);
 if (!backupPath || !supabaseUrl || !serviceKey) throw new Error('Set FIREBASE_BACKUP_PATH, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
 const data = JSON.parse(fs.readFileSync(backupPath));
+
+// Keep the original Firebase record for auditability, but never duplicate
+// embedded data URLs (which can make a REST request unnecessarily huge).
+const safeLegacy = (legacyId, record) => {
+  const copy = { legacy_id: legacyId, ...record };
+  for (const [key, value] of Object.entries(copy)) {
+    if (typeof value === 'string' && value.startsWith('data:image/')) copy[key] = '[omitted data URL]';
+  }
+  return copy;
+};
 
 const terms = Object.entries(data.terms || {});
 const termMap = new Map();
@@ -22,8 +33,8 @@ const rows = {
     termMap.set(`${r.TermNo}_${r.AcademicYear}`, termId);
     return { term_id: termId, display_label: `${r.TermNo}/${r.AcademicYear}`, academic_year: Number(r.AcademicYear), term_no: Number(r.TermNo), status: r.Status || 'active', legacy_term_key: legacyKey, legacy_data: r, created_at: r.CreatedAt || null };
   }),
-  app_users: Object.entries(data.users || {}).map(([legacyId, r]) => ({ user_id: r.UserID || legacyId, username: r.Username || null, email: r.Email || null, role: r.Role || null, status: r.Status || null, legacy_data: { legacy_id: legacyId, ...r } })),
-  auth_profiles: Object.entries(data.authProfiles || {}).map(([legacyId, r]) => ({ legacy_user_id: r.UserID || legacyId, email: r.Email || r.email || null, role: r.Role || r.role || null, status: r.Status || r.status || null, legacy_data: { legacy_id: legacyId, ...r } })),
+  app_users: Object.entries(data.users || {}).map(([legacyId, r]) => ({ user_id: r.UserID || legacyId, username: r.Username || null, email: r.Email || null, role: r.Role || null, status: r.Status || null, legacy_data: safeLegacy(legacyId, r) })),
+  auth_profiles: Object.entries(data.authProfiles || {}).map(([legacyId, r]) => ({ legacy_user_id: r.UserID || legacyId, email: r.Email || r.email || null, role: r.Role || r.role || null, status: r.Status || r.status || null, legacy_data: safeLegacy(legacyId, r) })),
 };
 const canonicalTerm = (r, legacyKey = '') => {
   const value = String(r?.TermID || r?.Term || r?.termId || r?.term || legacyKey);
@@ -31,18 +42,25 @@ const canonicalTerm = (r, legacyKey = '') => {
   return termMap.get(value) || null;
 };
 const legacyRows = (table, mapper) => Object.entries(data[table] || {}).map(([legacyId, r]) => mapper(legacyId, r)).filter(Boolean);
-rows.subjects = legacyRows('subjects', (id,r) => { const termId=canonicalTerm(r); return termId && {subject_code:r.SubjectCode||id, term_id:termId, subject_name:r.SubjectName||null, teacher:r.Teacher||null, status:r.Status||null, legacy_data:{legacy_id:id,...r}}; });
-rows.students = legacyRows('students', (id,r) => { const termId=canonicalTerm(r); return termId && {student_id:r.StudentID||id, term_id:termId, student_no:r.No == null ? null : String(r.No), prefix:r.Prefix||null, first_name:r.FirstName||null, last_name:r.LastName||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:{legacy_id:id,...r}}; });
-rows.teacher_classes = legacyRows('teacherClasses', (id,r) => { const decodedId=decodeURIComponent(id); const keyTerm=decodedId.startsWith('TC_1_2569_') ? '1_2569' : decodedId.split('_')[0]; const termId=canonicalTerm(r, keyTerm); return termId && {teacher_class_id:r.TeacherClassID||id, term_id:termId, teacher_id:r.TeacherID||null, subject_code:r.SubjectCode||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:{legacy_id:id,...r}}; });
-rows.assignments = legacyRows('assignments', (id,r) => { const termId=canonicalTerm(r); return termId && {assignment_id:r.AssignmentID||id, term_id:termId, teacher_class_id:r.TeacherClassID||null, subject_code:r.SubjectCode||null, title:r.Title||null, assignment_type:r.Type||null, max_score:r.MaxScore == null ? null : Number(r.MaxScore), due_date:r.DueDate||r.dueDate||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:{legacy_id:id,...r}}; });
-rows.attendance = legacyRows('attendance', (id,r) => { const termId=canonicalTerm(r); return termId && {record_id:r.RecordID||id, term_id:termId, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, attendance_date:r.Date||null, status:r.Status||null, note:r.Note||null, recorder:r.Recorder||null, legacy_data:{legacy_id:id,...r}}; });
-rows.scores = legacyRows('scores', (id,r) => { const termId=canonicalTerm(r); return termId && {score_id:r.ScoreID||id, term_id:termId, assignment_id:r.AssignmentID||null, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, score:r.Score == null || r.Score === '' ? null : Number(r.Score), is_submitted:Boolean(r.IsSubmitted), legacy_data:{legacy_id:id,...r}}; });
+rows.subjects = legacyRows('subjects', (id,r) => { const termId=canonicalTerm(r); return termId && {subject_code:r.SubjectCode||id, term_id:termId, subject_name:r.SubjectName||null, teacher:r.Teacher||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
+rows.students = legacyRows('students', (id,r) => { const termId=canonicalTerm(r); return termId && {student_id:r.StudentID||id, term_id:termId, student_no:r.No == null ? null : String(r.No), prefix:r.Prefix||null, first_name:r.FirstName||null, last_name:r.LastName||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
+rows.teacher_classes = legacyRows('teacherClasses', (id,r) => { const decodedId=decodeURIComponent(id); const keyTerm=decodedId.startsWith('TC_1_2569_') ? '1_2569' : decodedId.split('_')[0]; const termId=canonicalTerm(r, keyTerm); return termId && {teacher_class_id:r.TeacherClassID||id, term_id:termId, teacher_id:r.TeacherID||null, subject_code:r.SubjectCode||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
+rows.assignments = legacyRows('assignments', (id,r) => { const termId=canonicalTerm(r); return termId && {assignment_id:r.AssignmentID||id, term_id:termId, teacher_class_id:r.TeacherClassID||null, subject_code:r.SubjectCode||null, title:r.Title||null, assignment_type:r.Type||null, max_score:r.MaxScore == null ? null : Number(r.MaxScore), due_date:r.DueDate||r.dueDate||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
+rows.attendance = legacyRows('attendance', (id,r) => { const termId=canonicalTerm(r); return termId && {record_id:r.RecordID||id, term_id:termId, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, attendance_date:r.Date||null, status:r.Status||null, note:r.Note||null, recorder:r.Recorder||null, legacy_data:safeLegacy(id,r)}; });
+rows.scores = legacyRows('scores', (id,r) => { const termId=canonicalTerm(r); return termId && {score_id:r.ScoreID||id, term_id:termId, assignment_id:r.AssignmentID||null, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, score:r.Score == null || r.Score === '' ? null : Number(r.Score), is_submitted:Boolean(r.IsSubmitted), legacy_data:safeLegacy(id,r)}; });
+rows.settings = Object.entries(data.settings || {}).map(([legacyId, r]) => ({ setting_key:r.Key || legacyId, term_id:canonicalTerm(r) || null, value:r.Value ?? null, updated_by:r.UpdatedBy || null, updated_at:r.UpdatedAt || null }));
+rows.audit_log = (Array.isArray(data.auditLog) ? data.auditLog : Object.values(data.auditLog || {})).map((r) => ({ action:r.Action || r.action || null, target:r.Target || r.target || null, term_id:canonicalTerm(r) || null, user_id:r.UserID || r.userId || null, detail:r.Detail || r.detail || r, occurred_at:r.OccurredAt || r.occurredAt || r.Timestamp || null }));
 
 async function insert(table, values) {
   if (!values.length) return {table, count:0};
   if (dryRun) return {table, count:values.length, dryRun:true};
-  const response = await fetch(`${supabaseUrl}/rest/v1/${table}`, { method:'POST', headers:{ apikey:serviceKey, Authorization:`Bearer ${serviceKey}`, 'Content-Type':'application/json', Prefer:'resolution=ignore-duplicates,return=minimal' }, body:JSON.stringify(values) });
-  if (!response.ok) throw new Error(`${table}: ${response.status} ${await response.text()}`);
-  return {table, count:values.length};
+  let inserted = 0;
+  for (let i = 0; i < values.length; i += batchSize) {
+    const batch = values.slice(i, i + batchSize);
+    const response = await fetch(`${supabaseUrl}/rest/v1/${table}`, { method:'POST', headers:{ apikey:serviceKey, Authorization:`Bearer ${serviceKey}`, 'Content-Type':'application/json', Prefer:'resolution=ignore-duplicates,return=minimal' }, body:JSON.stringify(batch) });
+    if (!response.ok) throw new Error(`${table} batch ${i}-${i + batch.length}: ${response.status} ${await response.text()}`);
+    inserted += batch.length;
+  }
+  return {table, count:inserted, batches:Math.ceil(values.length / batchSize)};
 }
-(async()=>{ const result=[]; for (const [table, values] of Object.entries(rows)) result.push(await insert(table, values)); console.log(JSON.stringify({dryRun, result}, null, 2)); })().catch(err=>{ console.error(err.stack||err); process.exit(1); });
+(async()=>{ const result=[]; for (const [table, values] of Object.entries(rows)) result.push(await insert(table, values)); console.log(JSON.stringify({dryRun, batchSize, result}, null, 2)); })().catch(err=>{ console.error(err.stack||err); process.exit(1); });

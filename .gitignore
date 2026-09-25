@@ -11,4 +11,5 @@ _BACKUP_*
 # Local editor and OS metadata
 .vscode/
 .idea/
-
+.tools/
+supabase/.temp/
