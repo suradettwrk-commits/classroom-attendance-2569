@@ -171,6 +171,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['terms','app_users','auth_profiles','subjects','students','teacher_classes','assignments','attendance','scores','settings','audit_log'] loop
+    execute format('drop policy if exists %I on public.%I', 'staging_authenticated_all_' || t, t);
     execute format('create policy %I on public.%I for all to authenticated using (true) with check (true)', 'staging_authenticated_all_' || t, t);
   end loop;
 end $$;

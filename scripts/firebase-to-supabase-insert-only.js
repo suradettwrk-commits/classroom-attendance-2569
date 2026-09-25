@@ -10,6 +10,8 @@ const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dryRun = process.env.DRY_RUN !== '0';
 const batchSize = Number(process.env.BATCH_SIZE || 250);
+const concurrency = Math.max(1, Number(process.env.IMPORT_CONCURRENCY || 4));
+const onlyTables = process.env.ONLY_TABLES ? new Set(process.env.ONLY_TABLES.split(',').map(x => x.trim()).filter(Boolean)) : null;
 if (!backupPath || !supabaseUrl || !serviceKey) throw new Error('Set FIREBASE_BACKUP_PATH, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
 const data = JSON.parse(fs.readFileSync(backupPath));
 
@@ -45,22 +47,33 @@ const legacyRows = (table, mapper) => Object.entries(data[table] || {}).map(([le
 rows.subjects = legacyRows('subjects', (id,r) => { const termId=canonicalTerm(r); return termId && {subject_code:r.SubjectCode||id, term_id:termId, subject_name:r.SubjectName||null, teacher:r.Teacher||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
 rows.students = legacyRows('students', (id,r) => { const termId=canonicalTerm(r); return termId && {student_id:r.StudentID||id, term_id:termId, student_no:r.No == null ? null : String(r.No), prefix:r.Prefix||null, first_name:r.FirstName||null, last_name:r.LastName||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
 rows.teacher_classes = legacyRows('teacherClasses', (id,r) => { const decodedId=decodeURIComponent(id); const keyTerm=decodedId.startsWith('TC_1_2569_') ? '1_2569' : decodedId.split('_')[0]; const termId=canonicalTerm(r, keyTerm); return termId && {teacher_class_id:r.TeacherClassID||id, term_id:termId, teacher_id:r.TeacherID||null, subject_code:r.SubjectCode||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
-rows.assignments = legacyRows('assignments', (id,r) => { const termId=canonicalTerm(r); return termId && {assignment_id:r.AssignmentID||id, term_id:termId, teacher_class_id:r.TeacherClassID||null, subject_code:r.SubjectCode||null, title:r.Title||null, assignment_type:r.Type||null, max_score:r.MaxScore == null ? null : Number(r.MaxScore), due_date:r.DueDate||r.dueDate||null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
+rows.assignments = legacyRows('assignments', (id,r) => { const termId=canonicalTerm(r); const dueDate=r.DueDate||r.dueDate||null; return termId && {assignment_id:r.AssignmentID||id, term_id:termId, teacher_class_id:r.TeacherClassID||null, subject_code:r.SubjectCode||null, title:r.Title||null, assignment_type:r.Type||null, max_score:r.MaxScore == null ? null : Number(r.MaxScore), due_date:dueDate || null, level:r.Level||null, room:r.Room||null, status:r.Status||null, legacy_data:safeLegacy(id,r)}; });
 rows.attendance = legacyRows('attendance', (id,r) => { const termId=canonicalTerm(r); return termId && {record_id:r.RecordID||id, term_id:termId, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, attendance_date:r.Date||null, status:r.Status||null, note:r.Note||null, recorder:r.Recorder||null, legacy_data:safeLegacy(id,r)}; });
 rows.scores = legacyRows('scores', (id,r) => { const termId=canonicalTerm(r); return termId && {score_id:r.ScoreID||id, term_id:termId, assignment_id:r.AssignmentID||null, student_id:r.StudentID||null, subject_code:r.SubjectCode||null, score:r.Score == null || r.Score === '' ? null : Number(r.Score), is_submitted:Boolean(r.IsSubmitted), legacy_data:safeLegacy(id,r)}; });
-rows.settings = Object.entries(data.settings || {}).map(([legacyId, r]) => ({ setting_key:r.Key || legacyId, term_id:canonicalTerm(r) || null, value:r.Value ?? null, updated_by:r.UpdatedBy || null, updated_at:r.UpdatedAt || null }));
+rows.settings = Object.entries(data.settings || {}).map(([legacyId, r]) => ({ setting_key:r.Key || legacyId, term_id:canonicalTerm(r) || 'GLOBAL', value:r.Value ?? null, updated_by:r.UpdatedBy || null, updated_at:r.UpdatedAt || null }));
 rows.audit_log = (Array.isArray(data.auditLog) ? data.auditLog : Object.values(data.auditLog || {})).map((r) => ({ action:r.Action || r.action || null, target:r.Target || r.target || null, term_id:canonicalTerm(r) || null, user_id:r.UserID || r.userId || null, detail:r.Detail || r.detail || r, occurred_at:r.OccurredAt || r.occurredAt || r.Timestamp || null }));
 
 async function insert(table, values) {
+  if (onlyTables && !onlyTables.has(table)) return {table, count:0, skipped:true};
   if (!values.length) return {table, count:0};
   if (dryRun) return {table, count:values.length, dryRun:true};
-  let inserted = 0;
-  for (let i = 0; i < values.length; i += batchSize) {
-    const batch = values.slice(i, i + batchSize);
-    const response = await fetch(`${supabaseUrl}/rest/v1/${table}`, { method:'POST', headers:{ apikey:serviceKey, Authorization:`Bearer ${serviceKey}`, 'Content-Type':'application/json', Prefer:'resolution=ignore-duplicates,return=minimal' }, body:JSON.stringify(batch) });
-    if (!response.ok) throw new Error(`${table} batch ${i}-${i + batch.length}: ${response.status} ${await response.text()}`);
-    inserted += batch.length;
+  const batches = [];
+  for (let i = 0; i < values.length; i += batchSize) batches.push({ index:i, rows:values.slice(i, i + batchSize) });
+  for (let start = 0; start < batches.length; start += concurrency) {
+    const group = batches.slice(start, start + concurrency);
+    await Promise.all(group.map(async ({index, rows:batch}) => {
+      const response = await fetch(`${supabaseUrl}/rest/v1/${table}`, { method:'POST', headers:{ apikey:serviceKey, Authorization:`Bearer ${serviceKey}`, 'Content-Type':'application/json', Prefer:'resolution=ignore-duplicates,return=minimal' }, body:JSON.stringify(batch) });
+      if (!response.ok) throw new Error(`${table} batch ${index}-${index + batch.length}: ${response.status} ${await response.text()}`);
+    }));
   }
-  return {table, count:inserted, batches:Math.ceil(values.length / batchSize)};
+  return {table, count:values.length, batches:batches.length, concurrency};
 }
-(async()=>{ const result=[]; for (const [table, values] of Object.entries(rows)) result.push(await insert(table, values)); console.log(JSON.stringify({dryRun, batchSize, result}, null, 2)); })().catch(err=>{ console.error(err.stack||err); process.exit(1); });
+(async()=>{
+  const result=[];
+  result.push(await insert('terms', rows.terms));
+  for (const group of [['app_users','auth_profiles','subjects','students','teacher_classes'], ['assignments','attendance','scores','settings','audit_log']]) {
+    const groupResult = await Promise.all(group.map(table => insert(table, rows[table])));
+    result.push(...groupResult);
+  }
+  console.log(JSON.stringify({dryRun, batchSize, concurrency, onlyTables:onlyTables ? [...onlyTables] : null, result}, null, 2));
+})().catch(err=>{ console.error(err.stack||err); process.exit(1); });
