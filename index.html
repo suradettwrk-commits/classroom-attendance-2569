@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <base target="_top">
+    <title>ระบบจัดการชั้นเรียน - ครูสุรเดช ธรรมประโชติ</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Sarabun', 'sans-serif'] },
+                    colors: {
+                        'school-primary': '#1e3a8a',
+                        'school-secondary': '#fbbf24',
+                        'bg-soft': '#f8fafc'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1e3a8a;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-slate-800">
+
+    <div id="loading-overlay" class="fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center hidden">
+        <div class="loader mb-4"></div>
+        <p class="text-school-primary font-bold animate-pulse" id="loading-text">กำลังประมวลผล...</p>
+    </div>
+
+    <div id="page-login" class="fixed inset-0 z-40 flex items-center justify-center bg-gradient-to-br from-school-primary to-slate-900 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden fade-in relative">
+            <div class="h-32 bg-[url('https://img.freepik.com/free-vector/education-pattern-background-doodle-style_53876-115366.jpg')] bg-cover bg-center relative">
+                <div class="absolute inset-0 bg-school-primary/80"></div>
+                <div class="absolute -bottom-10 left-1/2 transform -translate-x-1/2">
+                    <div class="w-24 h-24 bg-white rounded-full p-2 shadow-lg flex items-center justify-center">
+                        <i class="fa-solid fa-graduation-cap text-4xl text-school-primary"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-12 pb-8 px-8 text-center">
+                <h1 class="text-xl font-bold text-slate-800">ระบบจัดการชั้นเรียน</h1>
+                <p class="text-sm font-semibold text-school-secondary">กลุ่มสาระสังคมศึกษา ศาสนาและวัฒนธรรม</p>
+                <p class="text-xs text-slate-500 mt-1">โรงเรียนวัดไร่ขิงวิทยา | ครูสุรเดช ธรรมประโชติ</p>
+
+                <form id="login-form" onsubmit="handleLogin(event)" class="mt-8 space-y-4 text-left">
+                    <div>
+                            <label class="text-xs font-bold text-slate-500 ml-1">เลขประจำตัวนักเรียน / ชื่อผู้ใช้ครู</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-3 top-3.5 text-slate-400 text-sm"></i>
+                            <input type="text" id="login-user" required 
+                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
+                                placeholder="นักเรียน: เลขประจำตัว | ครู: Username ที่ตั้งค่าไว้">
+                        </div>
+                    </div>
+             
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 ml-1">รหัสผ่าน</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3 top-3.5 text-slate-400 text-sm"></i>
+                            <input type="password" id="login-pass" required 
+                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
+                                placeholder="ระบุรหัสผ่าน">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-school-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-900 active:scale-95 transition flex items-center justify-center gap-2">
+                        <span>เข้าสู่ระบบ</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                    <button type="button" onclick="handleAdminGoogleLogin()" class="w-full border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-2">
+                        <i class="fa-brands fa-google text-red-500"></i><span>เข้าสู่ระบบแอดมินด้วย Google</span>
+                    </button>
+                </form>
+
+                <div class="mt-6 text-[10px] text-slate-400 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <p><i class="fa-solid fa-circle-info mr-1"></i> นักเรียน: รหัสผ่านคือ <b>wrk</b> ตามด้วยเลขประจำตัว | ครู: ใช้ Username/Password จากเมนูตั้งค่า</p>
+                    <p class="mt-1 opacity-50 text-[9px]">ระบบสำหรับผู้มีสิทธิ์ใช้งานเท่านั้น</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?!= include('loader') ?>
+
+    <div id="page-app" class="hidden h-full flex flex-col bg-bg-soft">
+        <div id="container-admin" class="hidden h-full">
+            <?!= include('admin'); ?> 
+        </div>
+        <div id="container-student" class="hidden h-full">
+            <?!= include('student'); ?>
+        </div>
+    </div>
+
+    <script>
+        let CURRENT_USER = null;
+        window.__AUTH_READY_STATE = 'pending';
+        const SESSION_KEY = 'wrk_school_session'; // Define session key
+
+        // Do not initialize the app before the Firebase bridge and Auth
+        // persistence are ready. Otherwise a restored teacher session can be
+        // mistaken for an anonymous user and all reads/writes appear denied.
+        window.onload = function() {
+            waitForBackendReady();
+        };
+
+        function waitForBackendReady(attempt = 0) {
+            const bridgeReady = !!(window.google && google.script && google.script.run);
+            const firebaseReady = !!(window.firebase && firebase.auth);
+            if (bridgeReady && firebaseReady) {
+                if (!window.__authBootstrapPromise) {
+                    window.__authBootstrapPromise = new Promise((resolve) => {
+                        let settled = false;
+                        let unsubscribe = null;
+                        const finish = (user) => {
+                            if (settled) return;
+                            settled = true;
+                            if (unsubscribe) unsubscribe();
+                            resolve(user || null);
+                        };
+                        const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
+                        unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+                            clearTimeout(timeout);
+                            finish(user);
+                        });
+                    });
+                }
+                window.__authBootstrapPromise.then((user) => {
+                    window.__FIREBASE_AUTH_USER = user || null;
+                    window.__AUTH_READY_STATE = user ? (user.isAnonymous ? 'anonymous' : 'authenticated') : 'missing';
+                    checkSession();
+                });
+                return;
+            }
+            if (attempt >= 40) {
+                setLoading(false);
+                const message = !bridgeReady
+                    ? 'ระบบเชื่อมต่อฐานข้อมูลไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วโหลดหน้าใหม่'
+                    : 'ระบบกำลังยืนยันบัญชีผู้ใช้ กรุณาโหลดหน้าใหม่อีกครั้ง';
+                if (typeof showLogin === 'function') showLogin();
+                if (typeof Swal !== 'undefined') Swal.fire({ icon: 'error', title: 'เปิดระบบไม่สมบูรณ์', text: message, confirmButtonText: 'ตกลง' });
+                return;
+            }
+            setTimeout(() => waitForBackendReady(attempt + 1), 250);
+        }
+
+        function getAssistantLinkParams() {
+            const params = new URLSearchParams(window.location.search || '');
+            const isAssistant = params.get('assistant') === '1' || params.get('mode') === 'assistant';
+            const uid = (params.get('uid') || params.get('sid') || '').trim();
+            if (!isAssistant || !uid) return null;
+            return {
+                uid,
+                term: (params.get('term') || '').trim(),
+                subject: (params.get('subject') || params.get('subjectCode') || '').trim(),
+                level: (params.get('level') || '').trim(),
+                room: (params.get('room') || '').trim()
+            };
+        }
+
+        // --- A) Helper Functions (Session Isolation) ---
+        
+        function saveSession(userObj) {
+            if (!userObj) return;
+            // รูป Base64 อาจมีขนาดใหญ่กว่าพื้นที่ของ sessionStorage จึงไม่เก็บรูปไว้ใน session
+            const sessionUser = { ...userObj };
+            if (typeof sessionUser.imageUrl === 'string' && sessionUser.imageUrl.startsWith('data:image/')) delete sessionUser.imageUrl;
+            delete sessionUser.password;
+            delete sessionUser.authUser;
+            try {
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+            } catch (e) {
+                sessionStorage.removeItem(SESSION_KEY);
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify({ id: sessionUser.id, username: sessionUser.username, name: sessionUser.name, role: sessionUser.role, status: sessionUser.status }));
+            }
+            // ลบ localStorage เดิมทิ้ง เพื่อไม่ให้ข้อมูลค้างข้าม Tab หรือหลังปิดเครื่อง
+            localStorage.removeItem(SESSION_KEY);
+        }
+
+        function loadSession() {
+            try {
+                // อ่านจาก sessionStorage เท่านั้น
+                const data = sessionStorage.getItem(SESSION_KEY);
+                return data ? JSON.parse(data) : null;
+            } catch (e) {
+                console.error("Session Parse Error", e);
+                return null;
+            }
+        }
+
+        function clearSession() {
+            // ล้างทั้งสองที่เพื่อให้มั่นใจว่าสะอาด
+            sessionStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(SESSION_KEY);
+        }
+
+        // --- B) Check Session (Updated) ---
+        function checkSession() {
+            const assistantLink = getAssistantLinkParams();
+            if (assistantLink) {
+                clearSession();
+                setLoading(true, 'กำลังเปิดหน้าเช็คชื่อผู้ช่วย...');
+                google.script.run
+                    .withSuccessHandler((response) => {
+                        setLoading(false);
+                        if (response && response.success && response.user && response.user.role === 'attendance_assistant') {
+                            CURRENT_USER = response.user;
+                            CURRENT_USER.assistantLink = assistantLink;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            showLogin();
+                            Swal.fire('เปิดลิงก์ไม่ได้', 'นักเรียนคนนี้ยังไม่ได้รับสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ', 'error');
+                        }
+                    })
+                    .withFailureHandler((err) => {
+                        setLoading(false);
+                        showLogin();
+                        Swal.fire('เปิดลิงก์ไม่ได้', String(err), 'error');
+                    })
+                    .loginSystem(assistantLink.uid, assistantLink.uid);
+                return;
+            }
+            const localUser = loadSession(); // ใช้ Helper ใหม่
+
+            // กันเหนียว: ถ้ามี localStorage ค้างมาจากระบบเก่า ให้ลบทิ้ง
+            if (localStorage.getItem(SESSION_KEY)) {
+                localStorage.removeItem(SESSION_KEY);
+            }
+
+            if (localUser && localUser.id) {
+                // Staff sessions must always be backed by the current Google account.
+                // A sessionStorage record alone must never reopen a teacher/admin screen,
+                // because it can belong to another Chrome profile or another email.
+                const localRole = String(localUser.role || '').toLowerCase();
+                const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(localRole);
+                const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+                const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
+                const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
+                const adminEmail = 'suradet.t@wrk.ac.th';
+                const emailMismatch = staffRole && firebaseUser && (
+                    (localRole === 'admin' && authEmail !== adminEmail) ||
+                    (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
+                );
+                if (staffRole && (!firebaseUser || firebaseUser.isAnonymous || emailMismatch)) {
+                    clearSession();
+                    setLoading(false);
+                    showLogin();
+                    Swal.fire('ต้องเข้าสู่ระบบด้วย Google', emailMismatch ? 'บัญชี Google ไม่ตรงกับอีเมลที่ผูกไว้ ระบบจึงไม่ใช้ข้อมูลค้างของบัญชีเดิม' : 'บัญชีครู/แอดมินต้องยืนยันด้วย Google เพื่อแยกสิทธิ์ตามอีเมลจริง', 'warning');
+                    return;
+                }
+                // มี Session -> ตรวจสอบกับ Server
+                setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
+                
+                if (google.script.run.getCurrentUserProfile) {
+                    google.script.run
+                        .withSuccessHandler((serverUser) => {
+                            setLoading(false);
+                            const normalizedUser = (serverUser && serverUser.success && serverUser.data) ? serverUser.data : serverUser;
+                            if (normalizedUser && normalizedUser.id) {
+                                CURRENT_USER = { ...localUser, ...normalizedUser };
+                                // อัปเดตลง SessionStorage
+                                saveSession(CURRENT_USER);
+                            } else {
+                                console.warn("Sync returned empty; refusing to reopen a staff session without server confirmation.");
+                                clearSession();
+                                showLogin();
+                                return;
+                            }
+                            renderAppByRole();
+                        })
+                        .withFailureHandler((err) => {
+                            setLoading(false);
+                            console.warn("Sync failed; refusing to reopen a staff session:", err);
+                            clearSession();
+                            showLogin();
+                        })
+                        .getCurrentUserProfile(localUser.id);
+                } else {
+                    setLoading(false);
+                    clearSession();
+                    showLogin();
+                }
+            } else {
+                // ไม่มี Session -> ไปหน้า Login
+                showLogin();
+            }
+        }
+
+        function showLogin() {
+            const el = document.getElementById('page-login');
+            if(el) el.classList.remove('hidden');
+        }
+
+        async function handleAdminGoogleLogin() {
+            try {
+                setLoading(true, 'กำลังตรวจสอบบัญชี Google...');
+                const result = await window.firebaseSignInWithGoogle();
+                setLoading(false);
+                if (result.needsSetup) {
+                    Swal.fire('ยังไม่มีสิทธิ์ใช้งาน', `อีเมล ${result.email || ''} ยังไม่ได้เพิ่มโดยผู้ดูแลระบบ กรุณาให้แอดมินเพิ่มอีเมลนี้ใน Users ก่อน`, 'error');
+                    return;
+                }
+                CURRENT_USER = result.user;
+                saveSession(CURRENT_USER);
+                    renderAppByRole();
+            } catch (error) {
+                setLoading(false);
+                Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
+            }
+        }
+
+        async function showTeacherSetupModal(authResult) {
+            const options = await new Promise((resolve, reject) => {
+                google.script.run.withSuccessHandler(r => r && r.success ? resolve(r.data) : reject(new Error(r?.message || 'โหลดรายการตั้งค่าไม่สำเร็จ'))).withFailureHandler(reject).getTeacherSetupOptions();
+            });
+            const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const comboOptions = (options.combos || []).map(c => `<option value="${esc(c.key)}" data-subject="${esc(c.subjectCode)}" data-level="${esc(c.level)}" data-room="${esc(c.room)}">${esc(c.subjectCode)} ${esc(c.subjectName)} — ${esc(c.level)} / ห้อง ${esc(c.room)}</option>`).join('');
+            const result = await Swal.fire({ title: 'ตั้งค่าสิทธิ์ครูครั้งแรก', html: `<p class="text-left text-sm mb-3">อีเมล <b>${esc(authResult.email)}</b> ให้เลือกจากชุดวิชา–ชั้น–ห้องที่ตั้งค่าไว้แล้ว</p><select id="setup-combo" class="swal2-select"><option value="">เลือกชุดวิชา–ชั้น–ห้อง</option>${comboOptions}</select>`, showCancelButton: true, confirmButtonText: 'ส่งคำขอ', cancelButtonText: 'ยกเลิก', preConfirm: () => { const option = document.getElementById('setup-combo').selectedOptions[0]; if (!option || !option.dataset.subject) { Swal.showValidationMessage('กรุณาเลือกชุดวิชา–ชั้น–ห้อง'); return false; } return { subjectCode: option.dataset.subject, level: option.dataset.level, room: option.dataset.room }; } });
+            if (!result.isConfirmed) { await firebase.auth().signOut(); return; }
+            try { const saved = await new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).submitTeacherAccessRequest(result.value)); if (!saved?.success) throw new Error(saved?.message || 'ส่งคำขอไม่สำเร็จ'); await firebase.auth().signOut(); await Swal.fire('ส่งคำขอแล้ว', saved.message, 'success'); } catch (error) { await firebase.auth().signOut(); await Swal.fire('ส่งคำขอไม่สำเร็จ', String(error.message || error), 'error'); }
+        }
+
+        // --- C) Handle Login (Updated) ---
+        function handleLogin(e) {
+            e.preventDefault();
+            const userEl = document.getElementById('login-user');
+            const passEl = document.getElementById('login-pass');
+            if(!userEl || !passEl) return;
+
+            const user = userEl.value.trim();
+            const pass = passEl.value.trim();
+            if(!user || !pass) {
+                Swal.fire('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบถ้วน', 'warning');
+                return;
+            }
+
+            setLoading(true, 'กำลังตรวจสอบข้อมูล...');
+            google.script.run
+                .withSuccessHandler((response) => {
+                    setLoading(false);
+                    if (response.success) {
+                        const role = String(response.user && response.user.role || '').toLowerCase();
+                        if (['admin', 'teacher', 'attendance_assistant'].includes(role)) {
+                            clearSession();
+                            Swal.fire('กรุณาเข้าสู่ระบบด้วย Google', 'บัญชีเจ้าหน้าที่ต้องใช้ Google ตามอีเมลที่ผู้ดูแลระบบกำหนด เพื่อป้องกันการใช้ session ของผู้ใช้อื่น', 'info');
+                            return;
+                        }
+                        CURRENT_USER = response.user; 
+                        
+                        // [CHANGE] ใช้ saveSession แทน localStorage.setItem
+                        saveSession(CURRENT_USER);
+                        
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'ยินดีต้อนรับ',
+                            text: `สวัสดีครับ/ค่ะ ${CURRENT_USER.name}`,
+                            timer: 1500,
+                            showConfirmButton: false
+                        }).then(() => {
+                            renderAppByRole();
+                        });
+                    } else {
+                        Swal.fire('เข้าสู่ระบบไม่สำเร็จ', response.message, 'error');
+                        passEl.value = '';
+                    }
+                })
+                .withFailureHandler((error) => {
+                    setLoading(false);
+                    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้: ' + error, 'error');
+                })
+                .loginSystem(user, pass);
+        }
+
+        // 3. Render หน้าจอตามสิทธิ์ (FIXED FOR TEACHER ROLE)
+        function renderAppByRole() {
+            const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+            const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const firebaseEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
+            const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
+            const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
+                firebaseUser && !firebaseUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
+            );
+            if (!identityOk) {
+                clearSession();
+                CURRENT_USER = null;
+                showLogin();
+                setLoading(false);
+                console.warn('STAFF_RENDER_BLOCKED: no matching Google Auth identity.');
+                return;
+            }
+            window.__AUTH_READY_STATE = ['admin', 'teacher', 'attendance_assistant'].includes(role) ? 'verified' : 'authenticated';
+            const loginPage = document.getElementById('page-login');
+            const appPage = document.getElementById('page-app');
+            const adminContainer = document.getElementById('container-admin');
+            const studentContainer = document.getElementById('container-student');
+
+            if(loginPage) loginPage.classList.add('hidden');
+            if(appPage) appPage.classList.remove('hidden');
+            
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teacher' || CURRENT_USER.role === 'attendance_assistant') {
+                if(studentContainer) studentContainer.classList.add('hidden');
+                if(adminContainer) adminContainer.classList.remove('hidden');
+                const initKey = [CURRENT_USER.id || '', CURRENT_USER.role || '', window.CURRENT_SERVER_TERM || ''].join('_');
+                if (window.__ADMIN_INIT_DONE_FOR_USER_TERM !== initKey) {
+                    window.__ADMIN_INIT_DONE_FOR_USER_TERM = initKey;
+                    if(typeof initAdminDashboard === 'function') initAdminDashboard();
+                }
+            } else {
+                Swal.fire('ยังไม่เปิดใช้งาน', 'ขณะนี้ยังไม่เปิดหน้า Student Portal สำหรับนักเรียน', 'info');
+                resetToLogin();
+                return;
+                if(adminContainer) adminContainer.classList.add('hidden');
+                if(studentContainer) studentContainer.classList.remove('hidden');
+                if(typeof initStudentDashboard === 'function') initStudentDashboard();
+            }
+        }
+
+        // 4. Logout (Updated)
+        function logout() {
+            Swal.fire({
+                title: 'ออกจากระบบ?',
+                text: "คุณต้องการออกจากระบบใช่หรือไม่",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#1e3a8a',
+                cancelButtonColor: '#d33',
+                confirmButtonText: 'ใช่, ออกจากระบบ',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    resetToLogin();
+                }
+            });
+        }
+
+        // --- D) Reset To Login (Updated) ---
+        function resetToLogin() {
+            // [CHANGE] ใช้ clearSession แทน localStorage.removeItem
+            clearSession();
+            
+            CURRENT_USER = null;
+            window.__AUTH_READY_STATE = 'missing';
+            window.__ADMIN_INIT_DONE_FOR_USER_TERM = '';
+
+            const appPage = document.getElementById('page-app');
+            if(appPage) appPage.classList.add('hidden');
+            
+            const adminContainer = document.getElementById('container-admin');
+            if(adminContainer) adminContainer.classList.add('hidden');
+            
+            const studentContainer = document.getElementById('container-student');
+            if(studentContainer) studentContainer.classList.add('hidden');
+
+            const loginPage = document.getElementById('page-login');
+            if(loginPage) loginPage.classList.remove('hidden');
+
+            const userEl = document.getElementById('login-user');
+            const passEl = document.getElementById('login-pass');
+            if(userEl) userEl.value = '';
+            if(passEl) passEl.value = '';
+
+            setLoading(false);
+        }
+
+        function setLoading(show, text = 'กำลังประมวลผล...') {
+            const el = document.getElementById('loading-overlay');
+            const txt = document.getElementById('loading-text');
+            if(show) {
+                if(txt) txt.innerText = text;
+                if(el) el.classList.remove('hidden');
+            } else {
+                if(el) el.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>

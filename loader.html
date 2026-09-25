@@ -1,0 +1,482 @@
+<script>
+/**
+ * DATA_CONTROLLER (The Local Brain)
+ * ทำหน้าที่: เป็นตัวกลางจัดการข้อมูลระหว่าง Server <-> Client
+ * ความสามารถ: โหลดข้อมูลก้อนใหญ่มาเก็บ, ให้บริการค้นหาข้อมูลแบบทันที (Instant Search)
+ */
+class DataController {
+    constructor() {
+        this.STORAGE_KEY_PREFIX = 'SYSTEM_DB_V3'; // บังคับซิงก์โครงสร้างข้อมูลใหม่ แยก Cache ตามเทอมและผู้ใช้
+        this.STORAGE_KEY = '';
+        this.db = null;
+        this.term = '';
+        this.userId = '';
+        this.user = null;
+        this.realtimeUnsubscribe = null;
+        this.realtimeGeneration = 0;
+    }
+
+    stopRealtime() {
+        this.realtimeGeneration += 1;
+        if (typeof this.realtimeUnsubscribe === 'function') this.realtimeUnsubscribe();
+        this.realtimeUnsubscribe = null;
+    }
+
+    startRealtime(term, user) {
+        if (typeof window.firebaseSubscribeTermData !== 'function') return;
+        this.stopRealtime();
+        const generation = this.realtimeGeneration;
+        const contextKey = this.buildStorageKey(term, user && user.id ? user.id : user);
+        this.realtimeUnsubscribe = window.firebaseSubscribeTermData(term, user, (response) => {
+            if (generation !== this.realtimeGeneration || contextKey !== this.STORAGE_KEY) {
+                return;
+            }
+            if (!response || !response.success || !response.data || response.initial !== true) return;
+            let incoming;
+            try { incoming = this.normalizeLookupMaps(response.data); }
+            catch (error) { console.error('DATA_CONTROLLER_REALTIME_NORMALIZE_ERROR', error); return; }
+            const hasRows = (incoming.students && incoming.students.length) || (incoming.assignments && incoming.assignments.length);
+            const hasCurrentRows = this.db && ((this.db.students && this.db.students.length) || (this.db.assignments && this.db.assignments.length));
+            if (!hasRows && hasCurrentRows) return;
+            this.db = incoming;
+            this.saveToStorage();
+            window.dispatchEvent(new CustomEvent('firebase-realtime-update', { detail: { term, initial: response.initial === true, data: incoming } }));
+        }, (error, pathName) => {
+            if (generation === this.realtimeGeneration) console.warn('FIREBASE_REALTIME_LISTENER_ERROR', pathName, error && error.code ? error.code : error);
+        });
+    }
+
+    // --- CORE: STORAGE MANAGEMENT ---
+
+    buildStorageKey(term, userId) {
+        return `${this.STORAGE_KEY_PREFIX}_${term || ''}_${userId || ''}`;
+    }
+
+    getContextKey(term, user) {
+        const userId = (user && user.id) ? user.id : user;
+        return this.buildStorageKey(term || '', userId || '');
+    }
+
+    hasCache(term, user) {
+        try {
+            return !!localStorage.getItem(this.getContextKey(term, user));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    setContext(term, user) {
+        this.term = term || '';
+        this.user = user || null;
+        this.userId = (user && user.id) ? user.id : (user || '');
+        this.STORAGE_KEY = this.buildStorageKey(this.term, this.userId);
+        this.db = this.loadFromStorage();
+    }
+
+    loadFromStorage() {
+        try {
+            if (!this.STORAGE_KEY) return null;
+            const raw = localStorage.getItem(this.STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            // เช็คอายุข้อมูล (เช่น ถ้าเกิน 24 ชม. ให้ถือว่าเก่าไป) - เบื้องต้นข้ามไปก่อน
+            return parsed;
+        } catch (e) {
+            console.warn('LocalStore Load Error:', e);
+            return null;
+        }
+    }
+
+    saveToStorage() {
+        try {
+            if (this.db && this.STORAGE_KEY) {
+                this.db.meta = this.db.meta || {};
+                this.db.meta.localSavedAt = Date.now();
+                // บันทึกเฉพาะข้อมูลจำเป็น เพื่อประหยัดพื้นที่
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.db));
+            }
+        } catch (e) {
+            if (e && e.name === 'QuotaExceededError') {
+                // Firebase data can be rebuilt; never remove the durable sync queue.
+                const removable = Object.keys(localStorage).filter(key =>
+                    key !== this.STORAGE_KEY && (
+                        key.startsWith('SYSTEM_DB_') ||
+                        key.startsWith('STUDENT_SNAPSHOT') ||
+                        key.startsWith('ADMIN_SETTINGS_BOOTSTRAP') ||
+                        key.startsWith('ATTENDANCE_')
+                    )
+                );
+                removable.forEach(key => localStorage.removeItem(key));
+                try {
+                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.db));
+                    console.warn('LocalStore quota recovered by removing rebuildable caches=' + removable.length);
+                    return;
+                } catch (retryError) {
+                    console.error('LocalStore Save Error after cache cleanup:', retryError);
+                    return;
+                }
+            }
+            console.error('LocalStore Save Error:', e);
+        }
+    }
+
+    normalizeTermValue(value, fallback) {
+        const raw = value || fallback || '';
+        if (typeof normalizeTermForUI === 'function') return normalizeTermForUI(raw);
+        if (typeof normalizeTerm === 'function') return normalizeTerm(raw);
+        return String(raw || '').trim();
+    }
+
+    // Firebase returns attendance/scores as rows, while the fast local
+    // lookup layer uses deterministic composite keys. Normalize both shapes
+    // at the boundary so fresh data and old caches behave identically.
+    normalizeLookupMaps(data) {
+        if (!data || typeof data !== 'object') return data;
+        const termOf = (value) => this.normalizeTermValue(value, this.term);
+        const rowsToMap = (value, keyOf) => {
+            if (!Array.isArray(value)) return value || {};
+            return value.reduce((out, row) => {
+                const key = keyOf(row);
+                if (key) out[key] = row;
+                return out;
+            }, {});
+        };
+        data.attendance = rowsToMap(data.attendance, (row) => {
+            const term = termOf(row.term || row.Term);
+            const recordId = String(row.recordId || row.RecordID || '').trim();
+            const idDate = recordId.match(/^ATT\|[^|]+\|(\d{4}-\d{2}-\d{2})\|/);
+            const rawDate = String(row.date || row.Date || '');
+            const date = idDate ? idDate[1] : rawDate.slice(0, 10);
+            const subject = String(row.subjectCode || row.subject || row.SubjectCode || '').trim();
+            const studentId = String(row.studentId || row.StudentID || '').trim();
+            return term && date && subject && studentId ? `${term}_${date}_${subject}_${studentId}` : '';
+        });
+        data.scores = rowsToMap(data.scores, (row) => {
+            const term = termOf(row.term || row.Term);
+            const assignment = String(row.assignmentId || row.AssignmentID || '').trim();
+            const studentId = String(row.studentId || row.StudentID || '').trim();
+            return term && assignment && studentId ? `${term}_${assignment}_${studentId}` : '';
+        });
+        return data;
+    }
+
+    rowTermMatches(rowTerm, targetTerm) {
+        const target = this.normalizeTermValue(targetTerm, '');
+        const row = this.normalizeTermValue(rowTerm, '');
+        if (!target) return true;
+        if (!row) return true;
+        return row === target;
+    }
+
+    init(term, user, options) {
+        options = options || {};
+        console.log('DATA_CONTROLLER: Initializing...');
+        const userId = (user && user.id) ? user.id : user;
+        if (!term || !userId) {
+            console.warn('DATA_CONTROLLER: Waiting for term and user context.');
+            return;
+        }
+
+        const requestedTerm = this.normalizeTermValue(term, '');
+        this.setContext(requestedTerm, user);
+        this.startRealtime(requestedTerm, user);
+
+        if (this.db) {
+            console.log('Loaded data from Local Cache (Ready to use)');
+        }
+
+        const contextKey = this.buildStorageKey(this.term, this.userId);
+        const syncNow = () => {
+            if (typeof google === 'undefined') return;
+            if (options.skipServerSync) return;
+            if (this._isLoading && this._loadingKey === contextKey) {
+                if (typeof options.onReady === 'function') this._pendingOnReady = options.onReady;
+                console.warn('DATA_CONTROLLER init skipped duplicate request', contextKey);
+                return;
+            }
+            this._isLoading = true;
+            this._loadingKey = contextKey;
+            const requestTerm = this.term;
+            const timer = setTimeout(() => {
+                if (this._isLoading && this._loadingKey === contextKey) {
+                    this._isLoading = false;
+                    this._loadingKey = '';
+                    console.error('DATA_CONTROLLER Init Timeout', requestTerm);
+                    console.log('TERM_DEBUG', {
+                        term: window.CURRENT_SERVER_TERM,
+                        dbMeta: this.db && this.db.meta,
+                        students: this.db && this.db.students && this.db.students.length,
+                        assignments: this.db && this.db.assignments && this.db.assignments.length
+                    });
+                    if (typeof options.onReady === 'function') options.onReady(this.db || null);
+                }
+            }, 30000);
+
+            google.script.run
+                .withSuccessHandler(response => {
+                    clearTimeout(timer);
+                    this._isLoading = false;
+                    this._loadingKey = '';
+                    if (this.STORAGE_KEY !== contextKey) return;
+                    if (response && response.success && response.data) {
+                        const incoming = response && response.data ? this.normalizeLookupMaps(response.data) : null;
+                        const incomingStudents = incoming && incoming.students ? incoming.students.length : 0;
+                        const incomingAssignments = incoming && incoming.assignments ? incoming.assignments.length : 0;
+                        const currentStudents = this.db && this.db.students ? this.db.students.length : 0;
+                        const currentAssignments = this.db && this.db.assignments ? this.db.assignments.length : 0;
+                        const incomingMeta = incoming && incoming.meta ? incoming.meta : {};
+                        const incomingIsEmpty = incomingStudents === 0 && incomingAssignments === 0;
+                        const currentHasGoodCache = currentStudents > 0 || currentAssignments > 0;
+                        const incomingIsWeak = incomingIsEmpty || incomingMeta.partial || incomingMeta.lazy;
+
+                        // skip เฉพาะเมื่อเทอมตรงกัน (ป้องกันข้อมูลเทอมเก่าโหลดแทนเทอมใหม่)
+                        const cachedDbTerm = this.db && this.db.meta ? this.normalizeTermValue(this.db.meta.term, '') : '';
+                        const termMismatch = cachedDbTerm && cachedDbTerm !== requestTerm;
+                        if (incomingIsEmpty && currentStudents > 0 && !termMismatch) {
+                            console.warn('DATA_CONTROLLER: skip empty server overwrite', {
+                                term: requestTerm,
+                                incomingStudents,
+                                incomingAssignments,
+                                currentStudents,
+                                currentAssignments,
+                                meta: incomingMeta
+                            });
+                            if (incomingMeta.debug) console.warn(incomingMeta.debug);
+                            console.log('TERM_DEBUG', {
+                                term: window.CURRENT_SERVER_TERM,
+                                dbMeta: this.db && this.db.meta,
+                                students: this.db && this.db.students && this.db.students.length,
+                                assignments: this.db && this.db.assignments && this.db.assignments.length
+                            });
+                            if (typeof options.onReady === 'function') options.onReady(this.db);
+                            if (typeof this._pendingOnReady === 'function') {
+                                const cb = this._pendingOnReady;
+                                this._pendingOnReady = null;
+                                cb(this.db);
+                            }
+                            return;
+                        }
+
+                        if (currentHasGoodCache && incomingIsWeak) {
+                            incoming.students = incomingStudents > 0 ? incoming.students : (this.db.students || []);
+                            incoming.assignments = incomingAssignments > 0 ? incoming.assignments : (this.db.assignments || []);
+                            if ((!incoming.subjects || incoming.subjects.length === 0) && this.db.subjects && this.db.subjects.length > 0) incoming.subjects = this.db.subjects;
+                            if ((!incoming.levels || incoming.levels.length === 0) && this.db.levels && this.db.levels.length > 0) incoming.levels = this.db.levels;
+                            if ((!incoming.rooms || incoming.rooms.length === 0) && this.db.rooms && this.db.rooms.length > 0) incoming.rooms = this.db.rooms;
+                            incoming.meta = incoming.meta || {};
+                            incoming.meta.localMergeSafe = true;
+                            incoming.meta.localMergeSourceCounts = {
+                                students: currentStudents,
+                                assignments: currentAssignments
+                            };
+                            console.warn('DATA_CONTROLLER: merged weak server data with local cache', {
+                                incomingStudents,
+                                incomingAssignments,
+                                currentStudents,
+                                currentAssignments,
+                                meta: incomingMeta
+                            });
+                            if (incomingMeta.debug) console.warn(incomingMeta.debug);
+                        }
+
+                        console.log('Synced fresh data from Server. Term:', incoming.meta && incoming.meta.term);
+                        this.db = incoming;
+                        this.db.meta = this.db.meta || {};
+                        this.db.meta.term = this.normalizeTermValue(this.db.meta.term, this.term);
+                        this.saveToStorage();
+                        console.log('TERM_DEBUG', {
+                            term: window.CURRENT_SERVER_TERM,
+                            dbMeta: this.db && this.db.meta,
+                            students: this.db && this.db.students && this.db.students.length,
+                            assignments: this.db && this.db.assignments && this.db.assignments.length
+                        });
+                        if (typeof options.onReady === 'function') options.onReady(this.db);
+                        if (typeof this._pendingOnReady === 'function') {
+                            const cb = this._pendingOnReady;
+                            this._pendingOnReady = null;
+                            cb(this.db);
+                        }
+                    } else {
+                        console.error('DATA_CONTROLLER Init Failed:', response && response.message ? response.message : 'Server returned no data.', response && response.debug);
+                        console.log('TERM_DEBUG', {
+                            term: window.CURRENT_SERVER_TERM,
+                            dbMeta: this.db && this.db.meta,
+                            students: this.db && this.db.students && this.db.students.length,
+                            assignments: this.db && this.db.assignments && this.db.assignments.length
+                        });
+                        if (typeof options.onReady === 'function') options.onReady(this.db || null);
+                    }
+                })
+                .withFailureHandler(err => {
+                    clearTimeout(timer);
+                    this._isLoading = false;
+                    this._loadingKey = '';
+                    console.error('DATA_CONTROLLER Init Failed:', err);
+                    console.log('TERM_DEBUG', {
+                        term: window.CURRENT_SERVER_TERM,
+                        dbMeta: this.db && this.db.meta,
+                        students: this.db && this.db.students && this.db.students.length,
+                        assignments: this.db && this.db.assignments && this.db.assignments.length
+                    });
+                    if (typeof options.onReady === 'function') options.onReady(this.db || null);
+                })
+                .getInitialSystemData(this.term, this.user);
+        };
+
+        const dbTerm = this.db && this.db.meta ? this.normalizeTermValue(this.db.meta.term, '') : '';
+        const contextMatches = !this.db || !dbTerm || dbTerm === this.term;
+        if (this.db && !contextMatches) {
+            console.warn('DATA_CONTROLLER: Ignoring cache for wrong term.', dbTerm, this.term);
+            this.db = null;
+        }
+        const hasPrimaryData = !!(this.db && (
+            (this.db.students && this.db.students.length > 0) ||
+            (this.db.assignments && this.db.assignments.length > 0) ||
+            (this.db.subjects && this.db.subjects.length > 0) ||
+            (this.db.attendance && Object.keys(this.db.attendance).length > 0)
+        ));
+        const cacheAge = this.db && this.db.meta && this.db.meta.localSavedAt ? Date.now() - Number(this.db.meta.localSavedAt) : Infinity;
+        const isFresh = cacheAge < 5 * 60 * 1000 && hasPrimaryData;
+
+        if (this.db && !options.forceSync) {
+            if (options.backgroundSync && !options.skipServerSync) {
+                if (!isFresh) setTimeout(syncNow, 300);
+                else console.log('DATA_CONTROLLER: Local cache fresh, skip background sync.');
+            }
+            return this.db;
+        }
+
+        // The Firebase static build uses the scoped realtime listener as its
+        // authoritative transport. Keep the one-shot Apps Script path only
+        // for the legacy build where no listener is available.
+        if (!options.skipServerSync && typeof window.firebaseSubscribeTermData !== 'function') syncNow();
+        return this.db;
+    }
+
+    // --- SERVICE API (ฟังก์ชันสำหรับให้ Admin เรียกใช้แทน google.script.run) ---
+
+    /**
+     * ดึงรายชื่อนักเรียนจากเครื่อง (เร็วมาก)
+     * @param {Object} filter { level: "ม.1", room: "1", q: "สมชาย" }
+     */
+    getStudents(filter) {
+        if (!this.db || !this.db.students) return { success: false, message: 'กำลังโหลดข้อมูล...' };
+        
+        const term = this.normalizeTermValue(filter.term || (this.db.meta ? this.db.meta.term : ''), this.term); 
+        const level = filter.level;
+        const room = filter.room;
+        const q = (filter.q || '').toLowerCase();
+
+        // กรองข้อมูลด้วย JavaScript ในเครื่อง (เร็วกว่าส่งไป Server 100 เท่า)
+        const filtered = this.db.students.filter(s => {
+            if (!this.rowTermMatches(s.term, term)) return false;
+            if (level && s.level != level) return false;
+            if (room && s.room != room) return false;
+            if (q) {
+                const fullName = `${s.prefix}${s.first} ${s.last}`.toLowerCase();
+                return s.id.includes(q) || fullName.includes(q);
+            }
+            return true;
+        });
+
+        // เรียงลำดับตามเลขที่
+        filtered.sort((a, b) => (parseInt(a.no)||0) - (parseInt(b.no)||0));
+        
+        return { success: true, students: filtered, isPartial: false };
+    }
+
+    /**
+     * ดึงข้อมูลการเช็คชื่อจากเครื่อง
+     * @param {Object} filter { date: "2024-06-01", subject: "ส21101", ... }
+     */
+    getAttendance(filter) {
+        if (!this.db || !this.db.attendance) return { success: false, message: 'กำลังโหลดข้อมูล...' };
+
+        // 1. ดึงรายชื่อนักเรียนในห้องนั้นมาก่อน
+        const term = this.normalizeTermValue(filter.term || (this.db.meta ? this.db.meta.term : ''), this.term);
+        const stdRes = this.getStudents({ term: term, level: filter.level, room: filter.room });
+        const students = stdRes.students || [];
+
+        // 2. แมพสถานะการเช็คชื่อจาก Key Map ที่เราเตรียมไว้
+        const dateStr = filter.date; // ต้องเป็น YYYY-MM-DD
+        const subj = filter.subject; // รหัสวิชา
+
+        let count = 0;
+        const result = students.map(s => {
+            // สร้าง Key เพื่อดึงข้อมูล O(1)
+            const key = `${term}_${dateStr}_${subj}_${s.id}`;
+            const att = this.db.attendance[key];
+            
+            if (att) {
+                count++;
+                return { ...s, attStatus: att.status, attNote: att.note, isChecked: true };
+            } else {
+                return { ...s, attStatus: 'มา', attNote: '', isChecked: false };
+            }
+        });
+
+        return { success: true, students: result, count: count };
+    }
+    
+    /**
+     * ดึงตารางคะแนนจากเครื่อง
+     */
+    getScores(filter) {
+        if (!this.db || !this.db.scores) return { success: false, message: 'กำลังโหลดข้อมูล...' };
+        
+        // 1. ดึงนักเรียน
+        const term = this.normalizeTermValue(filter.term || (this.db.meta ? this.db.meta.term : ''), this.term);
+        const stdRes = this.getStudents({ term: term, level: filter.level, room: filter.room });
+        const students = stdRes.students || [];
+        
+        // 2. ดึง Assignments ที่ตรงกับวิชา/ระดับชั้น
+        const assignments = (this.db.assignments || []).filter(a => {
+            // เช็ควิชา
+            const assignmentSubject = a.subject || a.subjectCode || a.SubjectCode;
+            if (assignmentSubject !== filter.subject) return false;
+            if (a.term && !this.rowTermMatches(a.term, term)) return false;
+            // เช็คระดับชั้น/ห้อง (ถ้างานระบุเจาะจง)
+            if (a.level && a.level != filter.level) return false;
+            if (a.room && a.room != filter.room) return false;
+            return true;
+        });
+
+        // 3. แมพคะแนนจาก Key Map
+        const flatScores = {};
+        assignments.forEach(asn => {
+            students.forEach(std => {
+                    const key = `${term}_${asn.id}_${std.id}`;
+                    if (this.db.scores[key]) {
+                        flatScores[`${asn.id}_${std.id}`] = this.db.scores[key];
+                    }
+            });
+        });
+
+        return { success: true, data: { students, assignments, scores: flatScores } };
+    }
+
+    /**
+     * อัปเดตข้อมูลการเช็คชื่อลง Cache ทันที (Optimistic Injection)
+     */
+    updateAttendanceRecord(term, date, subject, studentId, status, note) {
+        if (!this.db) return false;
+        if (!this.db.attendance) this.db.attendance = {};
+        
+        const normalizedTerm = this.normalizeTermValue(term, this.term);
+        const key = `${normalizedTerm}_${date}_${subject}_${studentId}`;
+        
+        this.db.attendance[key] = {
+            status: status || (this.db.attendance[key] ? this.db.attendance[key].status : 'มา'),
+            note: note !== undefined ? note : (this.db.attendance[key] ? this.db.attendance[key].note : ''),
+            recorder: (window.CURRENT_USER ? window.CURRENT_USER.name : 'Me') + ' (Local)',
+            timestamp: new Date().toISOString()
+        };
+        
+        this.saveToStorage();
+        return true;
+    }
+}
+
+// ประกาศตัวแปร Global ให้ Admin เรียกใช้ได้เลย
+var DATA_CONTROLLER = new DataController();
+</script>

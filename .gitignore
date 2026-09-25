@@ -1,0 +1,14 @@
+# Local backups and scratch artifacts
+scratch/
+_BACKUP_*
+*.sha256
+.DS_Store
+
+# Local data exports / personal workbooks
+*.xlsx
+*.csv
+
+# Local editor and OS metadata
+.vscode/
+.idea/
+

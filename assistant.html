@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <base target="_top">
+  <title>ผู้ช่วยเช็คชื่อ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; font-family: 'Prompt', sans-serif; background: #f3f4f6; color: #172033; min-height: 100dvh; }
+    header { position: sticky; top: 0; z-index: 5; background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-icon { width: 42px; height: 42px; border-radius: 14px; background: #1e3a8a; color: white; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .brand h1 { margin: 0; font-size: 1rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand p { margin: 2px 0 0; color: #64748b; font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .icon-btn { width: 40px; height: 40px; border: 0; border-radius: 12px; background: #eef2ff; color: #1e3a8a; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+    main { padding: 14px 14px 92px; max-width: 760px; margin: 0 auto; }
+    .panel { background: white; border: 1px solid #e5e7eb; border-radius: 18px; padding: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04); }
+    label { display: block; color: #64748b; font-size: 0.72rem; font-weight: 700; margin-bottom: 5px; }
+    select, input { width: 100%; border: 1px solid #dbe3ef; border-radius: 14px; padding: 10px 12px; font: inherit; background: white; outline: none; }
+    select:focus, input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .class-box { border: 1px solid #dbe3ef; border-radius: 14px; padding: 10px 12px; background: #f8fafc; font-weight: 700; min-height: 46px; display: flex; align-items: center; }
+    .save-bar { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.95); border-top: 1px solid #e5e7eb; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); z-index: 10; }
+    .save-inner { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .count { font-size: 0.78rem; color: #64748b; font-weight: 600; }
+    .primary { border: 0; border-radius: 14px; background: #f97316; color: white; padding: 11px 16px; font: inherit; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 142px; }
+    .primary:disabled { opacity: 0.55; }
+    .list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+    .student { background: white; border: 1px solid #e5e7eb; border-radius: 18px; padding: 12px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.035); }
+    .student-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .student-name { font-weight: 800; font-size: 0.95rem; }
+    .student-id { color: #94a3b8; font-size: 0.72rem; margin-top: 1px; }
+    .saved { color: #16a34a; font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+    .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .status { border: 0; border-radius: 12px; padding: 9px 0; font: inherit; font-size: 0.8rem; font-weight: 800; background: #f1f5f9; color: #64748b; }
+    .status.active { color: white; }
+    .status.present.active { background: #16a34a; }
+    .status.late.active { background: #f59e0b; }
+    .status.leave.active { background: #2563eb; }
+    .status.absent.active { background: #dc2626; }
+    .note { margin-top: 9px; font-size: 0.82rem; }
+    .empty { text-align: center; color: #94a3b8; padding: 38px 16px; }
+    #loader { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(255,255,255,0.86); backdrop-filter: blur(4px); gap: 10px; }
+    #loader.hidden { display: none; }
+    .spinner { width: 38px; height: 38px; border-radius: 50%; border: 4px solid #e5e7eb; border-top-color: #2563eb; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="loader">
+    <div class="spinner"></div>
+    <div id="loader-text" style="font-weight:700; color:#1e3a8a;">กำลังเปิดหน้าเช็คชื่อ...</div>
+  </div>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon"><i class="fa-solid fa-user-check"></i></div>
+      <div style="min-width:0;">
+        <h1>ผู้ช่วยเช็คชื่อ</h1>
+        <p id="assistant-name">กำลังตรวจสอบสิทธิ์...</p>
+      </div>
+    </div>
+    <button class="icon-btn" onclick="loadAttendance(true)" title="โหลดใหม่"><i class="fa-solid fa-rotate-right"></i></button>
+  </header>
+
+  <main>
+    <section class="panel">
+      <label for="subject-select">วิชาที่ได้รับมอบหมาย</label>
+      <select id="subject-select" onchange="loadAttendance(true)"></select>
+      <div class="grid">
+        <div>
+          <label for="att-date">วันที่</label>
+          <input id="att-date" type="date" onchange="loadAttendance(true)">
+        </div>
+        <div>
+          <label>ชั้น/ห้อง</label>
+          <div id="class-label" class="class-box">-</div>
+        </div>
+      </div>
+    </section>
+    <section id="student-list" class="list">
+      <div class="empty">กำลังโหลดรายชื่อ...</div>
+    </section>
+  </main>
+
+  <div class="save-bar">
+    <div class="save-inner">
+      <div class="count" id="save-count">0 รายชื่อ</div>
+      <button id="save-btn" class="primary" onclick="saveAllAttendance()"><i class="fa-solid fa-cloud-arrow-up"></i> บันทึก</button>
+    </div>
+  </div>
+
+  <script>
+    let CURRENT_USER = null;
+    const state = { students: [], scope: null };
+    const SERVER_PARAMS_JSON = '<?= ASSISTANT_PARAMS ?>';
+    let SERVER_PARAMS = {};
+    try { SERVER_PARAMS = JSON.parse(decodeURIComponent(SERVER_PARAMS_JSON || '%7B%7D')); } catch (e) { SERVER_PARAMS = {}; }
+
+    function el(id) { return document.getElementById(id); }
+    function showLoader(show, text) {
+      if (text && el('loader-text')) el('loader-text').innerText = text;
+      if (el('loader')) el('loader').classList.toggle('hidden', !show);
+    }
+    function params() {
+      const p = new URLSearchParams(window.location.search || '');
+      const getValue = function(key, altKey) {
+        return (p.get(key) || (altKey ? p.get(altKey) : '') || SERVER_PARAMS[key] || (altKey ? SERVER_PARAMS[altKey] : '') || '').trim();
+      };
+      return {
+        uid: getValue('uid', 'sid'),
+        term: getValue('term'),
+        subject: getValue('subject', 'subjectCode'),
+        level: getValue('level'),
+        room: getValue('room')
+      };
+    }
+    function todayText() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function selectedScope() {
+      const scopes = Array.isArray(CURRENT_USER && CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
+      const idx = parseInt(el('subject-select').value, 10);
+      return scopes[idx] || scopes[0] || null;
+    }
+
+    function parseLevelRoom(level, room) {
+      let lvl = String(level || '').trim();
+      let rm = String(room || '').trim();
+      if (lvl.indexOf('/') > -1) {
+        const parts = lvl.split('/');
+        lvl = parts[0] || '';
+        if (!rm && parts.length > 1) {
+          rm = parts[1] || '';
+        }
+      }
+      lvl = lvl.replace(/^ม\./, '').replace(/^เธก\./, '').replace(/^M\./i, '').replace(/^Grade\s*/i, '').trim();
+      rm = rm.replace(/^0+/, '') || rm;
+      return { level: lvl, room: rm };
+    }
+
+    window.addEventListener('load', function() {
+      const p = params();
+      if (el('att-date')) el('att-date').value = todayText();
+      if (!p.uid) {
+        showLoader(false);
+        el('student-list').innerHTML = '<div class="empty">ลิงก์ไม่ถูกต้อง: ไม่พบรหัสนักเรียน</div>';
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res || !res.success || !res.user || res.user.role !== 'attendance_assistant') {
+            showLoader(false);
+            el('student-list').innerHTML = '<div class="empty">ลิงก์นี้ยังไม่มีสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ</div>';
+            return;
+          }
+          CURRENT_USER = res.user;
+          el('assistant-name').innerText = CURRENT_USER.name || CURRENT_USER.id || 'ผู้ช่วยเช็คชื่อ';
+          renderSubjectOptions(p);
+          loadAttendance(true);
+        })
+        .withFailureHandler(function(err) {
+          showLoader(false);
+          el('student-list').innerHTML = `<div class="empty">${String(err)}</div>`;
+        })
+        .openAttendanceAssistantLink(p);
+    });
+
+    function renderSubjectOptions(link) {
+      const scopes = Array.isArray(CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
+      const options = scopes.map(function(s, i) {
+        const scopeClass = parseLevelRoom(s.level, s.room);
+        const linkClass = parseLevelRoom(link.level, link.room);
+        const selected = link.subject &&
+          String(s.subjectCode) === String(link.subject) &&
+          String(scopeClass.level) === String(linkClass.level) &&
+          String(scopeClass.room) === String(linkClass.room);
+        return `<option value="${i}" ${selected ? 'selected' : ''}>${s.subjectCode} | ${s.level}/${s.room}</option>`;
+      }).join('');
+      el('subject-select').innerHTML = options || '<option value="">ไม่มีวิชาที่ได้รับมอบหมาย</option>';
+    }
+
+    function loadAttendance(force) {
+      const scope = selectedScope();
+      if (!scope) {
+        showLoader(false);
+        el('class-label').innerText = '-';
+        el('student-list').innerHTML = '<div class="empty">ไม่มีวิชาที่ได้รับมอบหมาย</div>';
+        return;
+      }
+      state.scope = scope;
+      const rawLevel = scope.level || '';
+      const rawRoom = scope.room || '';
+      const displayLabel = rawRoom ? `${rawLevel}/${rawRoom}` : rawLevel;
+      el('class-label').innerText = displayLabel;
+
+      const normalized = parseLevelRoom(rawLevel, rawRoom);
+      const date = el('att-date').value || todayText();
+      showLoader(!!force, 'กำลังโหลดรายชื่อ...');
+      el('student-list').innerHTML = '<div class="empty">กำลังโหลดรายชื่อ...</div>';
+      google.script.run
+        .withSuccessHandler(function(res) {
+          showLoader(false);
+          if (!res || !res.success) {
+            el('student-list').innerHTML = `<div class="empty">${res && res.message ? res.message : 'โหลดรายชื่อไม่สำเร็จ'}</div>`;
+            return;
+          }
+          state.students = res.students || [];
+          renderStudents();
+        })
+        .withFailureHandler(function(err) {
+          showLoader(false);
+          el('student-list').innerHTML = `<div class="empty">${String(err)}</div>`;
+        })
+        .getAttendanceForCheck({
+          date,
+          subject: scope.subjectCode,
+          subjectCode: scope.subjectCode,
+          level: normalized.level,
+          room: normalized.room,
+          term: scope.term,
+          user: CURRENT_USER
+        });
+    }
+
+    function renderStudents() {
+      const list = el('student-list');
+      const students = state.students || [];
+      el('save-count').innerText = `${students.length} รายชื่อ`;
+      if (!students.length) {
+        list.innerHTML = '<div class="empty">ไม่พบรายชื่อนักเรียนในห้องนี้</div>';
+        return;
+      }
+      list.innerHTML = students.map(function(s) {
+        const status = s.attStatus || 'มา';
+        const name = `${s.prefix || ''}${s.first || ''} ${s.last || ''}`.trim();
+        const buttons = [
+          ['มา', 'present'],
+          ['สาย', 'late'],
+          ['ลา', 'leave'],
+          ['ขาด', 'absent']
+        ].map(function(item) {
+          const active = status === item[0] ? ' active' : '';
+          return `<button class="status ${item[1]}${active}" onclick="setStatus('${s.id}','${item[0]}')">${item[0]}</button>`;
+        }).join('');
+        return `<article class="student">
+          <div class="student-top">
+            <div>
+              <div class="student-name">${s.no || '-'} ${name}</div>
+              <div class="student-id">${s.id}</div>
+            </div>
+            <div class="saved">${s.attRecorder ? 'บันทึกแล้ว' : ''}</div>
+          </div>
+          <div class="status-grid">${buttons}</div>
+          <input class="note" value="${s.attNote || ''}" placeholder="หมายเหตุ..." onchange="setNote('${s.id}', this.value)">
+        </article>`;
+      }).join('');
+    }
+
+    function setStatus(studentId, status) {
+      const s = state.students.find(function(x) { return String(x.id) === String(studentId); });
+      if (!s) return;
+      s.attStatus = status;
+      s.isChecked = true;
+      renderStudents();
+    }
+
+    function setNote(studentId, note) {
+      const s = state.students.find(function(x) { return String(x.id) === String(studentId); });
+      if (!s) return;
+      s.attNote = note;
+      s.isChecked = true;
+    }
+
+    function saveAllAttendance() {
+      const scope = state.scope || selectedScope();
+      const date = el('att-date').value || todayText();
+      if (!scope || !state.students.length) {
+        Swal.fire('เตือน', 'กรุณาโหลดรายชื่อก่อนบันทึก', 'warning');
+        return;
+      }
+      const btn = el('save-btn');
+      btn.disabled = true;
+      showLoader(true, 'กำลังบันทึก...');
+      const records = state.students.map(function(s) {
+        return { id: s.id, status: s.attStatus || 'มา', note: s.attNote || '' };
+      });
+      const normalized = parseLevelRoom(scope.level, scope.room);
+      google.script.run
+        .withSuccessHandler(function(res) {
+          btn.disabled = false;
+          showLoader(false);
+          if (!res || !res.success) {
+            Swal.fire('บันทึกไม่สำเร็จ', res && res.message ? res.message : 'Server error', 'error');
+            return;
+          }
+          Swal.fire({ icon: 'success', title: 'บันทึกเรียบร้อย', text: `บันทึก ${res.saved || records.length} รายการ`, timer: 1300, showConfirmButton: false });
+          loadAttendance(false);
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          showLoader(false);
+          Swal.fire('บันทึกไม่สำเร็จ', String(err), 'error');
+        })
+        .saveAttendance({
+          date,
+          subject: scope.subjectCode,
+          level: normalized.level,
+          room: normalized.room,
+          term: scope.term,
+          recorder: CURRENT_USER ? CURRENT_USER.name : 'ผู้ช่วยเช็คชื่อ',
+          records,
+          user: CURRENT_USER
+        });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <!-- PWA & Mobile Viewport Settings (Optimized) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EduVerse">
+  <meta name="theme-color" content="#2563EB">
+  <title>EduVerse Connect</title>
+  
+  <!-- Font: Prompt -->
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <style>
+    :root {
+      --primary: #2563EB;      /* Royal Blue */
+      --primary-dark: #1E3A8A; /* Navy */
+      --accent: #F97316;       /* Orange */
+      --accent-secondary: #10B981; /* Green */
+      
+      --bg-app: #F3F4F6;      
+      --bg-white: #FFFFFF;
+      --text-main: #1F2937;
+      --text-sub: #6B7280;
+      
+      --card-radius: 24px;
+      --nav-height: 75px;
+      
+      /* Safe Area Variables for iPhone Notch */
+      --sat: env(safe-area-inset-top);
+      --sab: env(safe-area-inset-bottom);
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    /* --- CRITICAL SCROLL FIX (FIXED SHELL) --- */
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0; padding: 0;
+      overflow: hidden; /* Lock the viewport completely */
+      position: fixed; /* Prevent body scroll bounce on iOS */
+      background-color: var(--bg-app);
+      font-family: 'Prompt', sans-serif;
+      color: var(--text-main);
+    }
+
+    /* --- Notification Toast --- */
+    #toast {
+      position: fixed; top: calc(20px + var(--sat)); left: 50%; transform: translate(-50%, -200%);
+      background: rgba(30, 58, 138, 0.95); color: white;
+      padding: 10px 20px; border-radius: 30px; z-index: 9999;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      font-size: 0.9rem; display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    }
+    #toast.show { transform: translate(-50%, 0); }
+
+    /* --- Header (Fixed Top) --- */
+    header {
+      position: absolute; /* Using absolute inside fixed body */
+      top: 0; left: 0; width: 100%;
+      padding: 15px 20px;
+      padding-top: calc(15px + var(--sat));
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--bg-app); z-index: 50;
+      height: auto; /* Let content dictate height, we'll calculate main container top later */
+      box-shadow: 0 1px 0 rgba(0,0,0,0.05); /* Subtle separator */
+    }
+    .user-info { display: flex; gap: 10px; align-items: center; }
+    .avatar { width: 45px; height: 45px; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); object-fit: cover; }
+    .greetings h3 { margin: 0; font-size: 1rem; color: var(--text-main); font-weight: 600; line-height: 1.2; }
+    .greetings span { font-size: 0.75rem; color: var(--text-sub); }
+    
+    .btn-icon {
+      width: 40px; height: 40px; border-radius: 12px; background: white;
+      border: none; color: var(--primary); font-size: 1.1rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05); cursor: pointer; position: relative;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* --- Main Container (SCROLLABLE AREA) --- */
+    .main-container {
+      position: absolute;
+      top: 90px; /* Approximate header height + padding */
+      bottom: calc(var(--nav-height) + var(--sab)); /* Stop above nav bar */
+      left: 0; right: 0;
+      overflow-y: auto; /* Enable Vertical Scroll */
+      padding: 10px 20px 40px 20px; /* Add bottom padding for content breathing room */
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch; /* Momentum scrolling on iOS */
+      overscroll-behavior-y: contain; /* Prevent scroll chaining to body */
+    }
+
+    /* Adjust top if notch exists or header is taller - handled dynamically usually, but safe estimate here */
+    @supports (padding-top: env(safe-area-inset-top)) {
+      .main-container { top: calc(90px + env(safe-area-inset-top)); }
+    }
+
+    /* Pages Animation */
+    .page { display: none; animation: fadeIn 0.3s ease; width: 100%; }
+    .page.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* --- Components --- */
+    .card-hero {
+      background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%);
+      border-radius: var(--card-radius); padding: 20px; color: white;
+      position: relative; overflow: hidden; margin-bottom: 20px;
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+    }
+    .card-hero h2 { margin: 5px 0; font-size: 1.3rem; line-height: 1.3; font-weight: 600; }
+    .card-hero p { margin: 0 0 15px 0; opacity: 0.9; font-weight: 300; font-size: 0.85rem; }
+    .tag-deadline { background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; margin-left: 5px; }
+    
+    .btn-action {
+      background: var(--accent); color: white; border: none;
+      padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer;
+      font-family: 'Prompt'; font-size: 0.85rem; box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+
+    /* Stats Grid */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stat-box {
+      background: white; padding: 15px; border-radius: 20px;
+      display: flex; flex-direction: column; justify-content: space-between;
+      height: 130px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); cursor: pointer;
+      transition: transform 0.1s; position: relative; overflow: hidden;
+    }
+    .stat-box:active { transform: scale(0.98); }
+    .stat-box.dark { background: var(--primary-dark); color: white; }
+    
+    .stat-icon { 
+      width: 36px; height: 36px; border-radius: 10px; 
+      display: flex; align-items: center; justify-content: center; 
+      margin-bottom: 8px; font-size: 1.1rem;
+    }
+    
+    .val { font-size: 1.4rem; font-weight: 700; line-height: 1; }
+    .label { font-size: 0.75rem; opacity: 0.8; margin-top: 4px; }
+    .trend { font-size: 0.7rem; color: var(--accent-secondary); display: flex; align-items: center; gap: 2px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Task/List Items */
+    .task-item {
+      background: white; padding: 15px; border-radius: 16px;
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: 0.1s;
+    }
+    .task-item:active { transform: scale(0.98); }
+    .task-icon {
+      width: 42px; height: 42px; border-radius: 12px; background: #EEF2FF; color: var(--primary);
+      display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;
+    }
+    .task-status { font-size: 0.65rem; padding: 3px 8px; border-radius: 6px; background: #DCFCE7; color: #166534; font-weight: 600; white-space: nowrap;}
+    .task-status.pending { background: #FFEDD5; color: #9A3412; }
+    .task-status.missing { background: #FEE2E2; color: #DC2626; }
+
+    /* Bottom Nav (FIXED) */
+    .nav-bar {
+      position: absolute; 
+      bottom: 0; left: 0; width: 100%;
+      height: calc(var(--nav-height) + var(--sab));
+      padding-bottom: var(--sab);
+      background: var(--primary-dark);
+      border-radius: 24px 24px 0 0;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      align-items: center; padding-left: 10px; padding-right: 10px;
+      box-shadow: 0 -5px 30px rgba(0,0,0,0.15);
+      z-index: 100;
+    }
+    .nav-btn {
+      background: none; border: none;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      color: rgba(255,255,255,0.5); cursor: pointer; transition: 0.2s;
+      padding-top: 10px;
+    }
+    .nav-btn i { font-size: 1.2rem; }
+    .nav-btn span { font-size: 0.6rem; font-weight: 500;}
+    .nav-btn.active { color: white; transform: translateY(-2px); }
+    .nav-btn.active span { font-weight: 600; }
+
+    .nav-center { transform: translateY(-25px); }
+    .btn-ai {
+      width: 55px; height: 55px; background: var(--accent);
+      border-radius: 50%; border: 5px solid var(--bg-app);
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 1.4rem;
+      box-shadow: 0 8px 20px rgba(249, 115, 22, 0.4);
+      cursor: pointer; transition: 0.2s; position: relative;
+    }
+    .btn-ai:active { transform: scale(0.9); }
+    .ai-pulse { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid var(--accent); animation: pulse 2s infinite; opacity: 0; }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.4); opacity: 0; } }
+
+    /* Loader */
+    #global-loader {
+      position: fixed; inset: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(5px);
+      z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      transition: opacity 0.3s;
+    }
+    #global-loader.hidden { opacity: 0; pointer-events: none; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #E5E7EB; border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Chat Modal */
+    #chat-modal-overlay {
+        position: fixed; inset: 0; z-index: 200;
+        background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
+        display: none; align-items: flex-end; justify-content: center;
+        opacity: 0; transition: opacity 0.3s;
+    }
+    #chat-modal-overlay.active { display: flex; opacity: 1; }
+    
+    .chat-modal-container {
+        width: 100%; height: 85dvh; /* Viewport Height for mobile */
+        max-width: 600px;
+        background: #F3F4F6;
+        border-radius: 24px 24px 0 0;
+        box-shadow: 0 -10px 40px rgba(0,0,0,0.2);
+        display: flex; flex-direction: column;
+        transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        overflow: hidden;
+    }
+    #chat-modal-overlay.active .chat-modal-container { transform: translateY(0); }
+
+    .chat-header {
+        padding: 16px 20px; background: white; border-bottom: 1px solid #E5E7EB;
+        display: flex; justify-content: space-between; align-items: center;
+        border-radius: 24px 24px 0 0; flex-shrink: 0;
+    }
+    .chat-body {
+        flex: 1; overflow-y: auto; padding: 15px;
+        display: flex; flex-direction: column; gap: 12px;
+        background: #F9FAFB;
+        -webkit-overflow-scrolling: touch;
+    }
+    .chat-footer {
+        padding: 12px 15px; 
+        padding-bottom: calc(12px + var(--sab));
+        background: white; border-top: 1px solid #E5E7EB;
+        display: flex; gap: 10px; align-items: center; flex-shrink: 0;
+    }
+    
+    .msg { padding: 10px 16px; max-width: 85%; border-radius: 18px; font-size: 0.9rem; line-height: 1.5; word-wrap: break-word; }
+    .msg.bot { background: white; align-self: flex-start; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #E5E7EB; color: #374151; }
+    .msg.user { background: var(--primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2); }
+    
+    .chat-input-new {
+        flex: 1; border: none; background: #F3F4F6; padding: 10px 16px;
+        border-radius: 25px; font-family: 'Prompt'; outline: none; font-size: 0.95rem;
+    }
+    .chat-btn-new {
+        width: 40px; height: 40px; border-radius: 50%; background: var(--primary); color: white;
+        border: none; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3); transition: 0.2s; font-size: 1rem;
+    }
+    .chat-btn-new:active { transform: scale(0.9); }
+
+  </style>
+</head>
+<body>
+
+  <!-- Loading Screen -->
+  <div id="global-loader">
+    <div class="spinner"></div>
+    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--primary); font-weight: 600;">กำลังซิงค์ข้อมูล...</p>
+  </div>
+
+  <div id="toast"><i class="fas fa-check-circle"></i> <span id="toast-msg">ข้อความ</span></div>
+
+  <header>
+    <div class="user-info" onclick="navTo('profile')">
+      <img id="user-avatar" src="https://ui-avatars.com/api/?name=St&background=1e3a8a&color=fff" class="avatar" alt="Student">
+      <div class="greetings">
+        <span>สวัสดีครับ,</span>
+        <h3 id="user-name">...</h3>
+        <p style="font-size: 0.7rem; color: #6B7280; margin:0;" id="user-class">กำลังโหลด...</p>
+      </div>
+    </div>
+    <button class="btn-icon" onclick="initStudentDashboard(true)">
+      <i class="fas fa-sync-alt" id="refresh-icon"></i>
+    </button>
+  </header>
+
+  <div class="main-container no-scrollbar">
+    
+    <!-- === PAGE 1: DASHBOARD === -->
+    <div id="p-home" class="page active">
+      <div class="card-hero">
+        <p>งานที่ต้องส่ง <span class="tag-deadline" id="hero-term">ล่าสุด</span></p>
+        <h2 id="hero-title" style="font-weight: 600;">ไม่มีงานค้าง</h2>
+        <p id="hero-subtitle">คุณส่งงานครบทุกชิ้นแล้ว</p>
+        <button class="btn-action" onclick="navTo('tasks')">
+            <i class="fas fa-clipboard-list"></i> ดูงานทั้งหมด
+        </button>
+        <img src="https://cdn-icons-png.flaticon.com/512/2921/2921222.png" style="position:absolute; right:-20px; bottom:-30px; width:130px; opacity:0.15; transform: rotate(-15deg);">
+      </div>
+
+      <h4 style="margin: 20px 0 15px; font-weight: 600; padding-left: 5px; border-left: 4px solid var(--accent); line-height: 1;">สรุปผลการเรียน</h4>
+      <div class="grid-2">
+        <div class="stat-box dark" onclick="navTo('tasks')">
+          <div class="stat-icon" style="background:rgba(255,255,255,0.15);"><i class="fas fa-tasks"></i></div>
+          <div><div class="val" id="stat-pending">0</div><div class="label">งานค้างส่ง</div><div class="trend" id="stat-pending-trend" style="font-size: 0.65rem; opacity: 0.8;">เยี่ยมมาก!</div></div>
+        </div>
+        <div class="stat-box" onclick="navTo('attendance')">
+          <div class="stat-icon" style="background:#DCFCE7; color:#166534;"><i class="fas fa-user-check"></i></div>
+          <div><div class="val" id="stat-attendance">-</div><div class="label">มาเรียน</div><div class="trend" style="color:#166534;">คลิกเพื่อดู</div></div>
+        </div>
+        <div class="stat-box" onclick="navTo('grades')">
+          <div class="stat-icon" style="background:#E0F2FE; color:#0369A1;"><i class="fas fa-star"></i></div>
+          <div><div class="val" id="stat-score-avg">-</div><div class="label">คะแนนเฉลี่ย</div><div class="trend">จากงานที่ส่งแล้ว</div></div>
+        </div>
+        <div class="stat-box" onclick="navTo('profile')">
+          <div class="stat-icon" style="background:#FFEDD5; color:#C2410C;"><i class="fas fa-user-graduate"></i></div>
+          <div><div class="val" style="font-size: 1.2rem;">ข้อมูลส่วนตัว</div><div class="label" id="stat-id-card">-</div><div class="trend" style="color: #C2410C;">แตะเพื่อแก้ไข</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- === PAGE 2: GRADES === -->
+    <div id="p-grades" class="page">
+      <h3 style="margin-bottom:20px; font-weight: 600;">ผลการเรียนรายวิชา</h3>
+      <div style="background:white; padding:15px; border-radius:20px; box-shadow:0 5px 20px rgba(0,0,0,0.03); margin-bottom: 20px;">
+        <canvas id="scoreChart" height="220"></canvas>
+      </div>
+      <h4 style="margin: 20px 0 10px; font-weight: 600;">คะแนนล่าสุด</h4>
+      <div id="grade-list-container" style="padding-bottom: 20px;">
+          <div class="text-center text-gray-400 py-10 opacity-50"><i class="fas fa-chart-bar text-3xl mb-2"></i><br>กำลังโหลด...</div>
+      </div>
+    </div>
+
+    <!-- === PAGE 3: TASKS === -->
+    <div id="p-tasks" class="page">
+      <h3 style="margin-bottom:20px; font-weight: 600;">งานและการบ้าน</h3>
+      <div id="tasks-container" style="padding-bottom: 20px;"></div>
+    </div>
+
+    <!-- === PAGE 4: ATTENDANCE (NEW) === -->
+    <div id="p-attendance" class="page">
+      <h3 style="margin-bottom:20px; font-weight: 600;">ประวัติการเข้าเรียน</h3>
+      <div id="attendance-list-container" style="display: flex; flex-direction: column; gap: 10px; padding-bottom: 20px;">
+          <div class="text-center text-gray-400 py-10">ไม่พบประวัติการขาดเรียน</div>
+      </div>
+    </div>
+
+    <!-- === ASSISTANT ATTENDANCE: STUDENT-ONLY ENTRY === -->
+    <div id="p-assistant-attendance" class="page">
+      <h3 style="margin-bottom:12px; font-weight: 600;">เช็คชื่อประจำวิชา</h3>
+      <div style="background:white; border-radius:20px; padding:14px; box-shadow:0 5px 20px rgba(0,0,0,0.03); margin-bottom:14px;">
+        <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">วิชา</label>
+        <select id="assistant-subject-select" onchange="assistantLoadAttendance()" style="width:100%; margin:4px 0 10px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; font-family:Prompt; background:white;"></select>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div>
+            <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">วันที่</label>
+            <input id="assistant-att-date" type="date" onchange="assistantLoadAttendance()" style="width:100%; margin-top:4px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; font-family:Prompt;">
+          </div>
+          <div>
+            <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">ห้อง</label>
+            <div id="assistant-class-label" style="margin-top:4px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; background:#F9FAFB; font-weight:600;">-</div>
+          </div>
+        </div>
+        <button onclick="assistantSaveAllAttendance()" class="btn-action" style="width:100%; justify-content:center; margin-top:12px; border-radius:14px; padding:11px;">
+          <i class="fas fa-cloud-arrow-up"></i> บันทึกทั้งหมด
+        </button>
+      </div>
+      <div id="assistant-attendance-list" style="display:flex; flex-direction:column; gap:10px; padding-bottom:20px;">
+        <div class="text-center text-gray-400 py-10">กำลังเตรียมข้อมูล...</div>
+      </div>
+    </div>
+
+    <!-- === PAGE 5: PROFILE === -->
+    <div id="p-profile" class="page">
+      <div style="text-align:center; margin-top:20px; padding: 20px 0; background: white; border-radius: 24px; box-shadow: 0 5px 20px rgba(0,0,0,0.03);">
+        <!-- Profile Image with Edit Overlay -->
+        <div style="position:relative; display:inline-block;" onclick="document.getElementById('profile-upload').click()">
+          <img id="profile-img-lg" src="https://ui-avatars.com/api/?name=User&background=ccc" style="width:100px; height:100px; border-radius:50%; border:4px solid white; box-shadow:0 10px 20px rgba(0,0,0,0.1); object-fit: cover;">
+          <div style="position:absolute; bottom:5px; right:5px; background:var(--accent); width:28px; height:28px; border-radius:50%; border:3px solid white; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem;">
+            <i class="fas fa-camera"></i>
+          </div>
+        </div>
+        <!-- Hidden File Input -->
+        <input type="file" id="profile-upload" style="display: none;" accept="image/*" onchange="uploadProfileImage(this)">
+        
+        <!-- Editable Name -->
+        <div class="flex items-center justify-center gap-2 mt-4">
+            <h2 style="font-size: 1.2rem; margin:0;" id="profile-name">-</h2>
+            <button onclick="editProfileName()" class="text-gray-400 hover:text-blue-600"><i class="fas fa-pen"></i></button>
+        </div>
+        <span class="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-bold mt-2 inline-block" id="profile-status">Active</span>
+      </div>
+      
+      <div style="margin-top:20px; display:flex; flex-direction:column; gap:12px;">
+        <div class="task-item"><i class="fas fa-id-card text-2xl text-blue-600 w-8"></i><div style="flex:1"><span class="text-xs text-gray-400 block">รหัสประจำตัว</span><b id="profile-id" class="text-gray-700">-</b></div></div>
+        <div class="task-item"><i class="fas fa-layer-group text-2xl text-orange-500 w-8"></i><div style="flex:1"><span class="text-xs text-gray-400 block">ระดับชั้น/ห้อง</span><b id="profile-room" class="text-gray-700">-</b></div></div>
+        <div class="task-item" onclick="logout()" style="cursor: pointer;"><i class="fas fa-sign-out-alt text-2xl text-red-500 w-8"></i><b style="color:red;">ออกจากระบบ</b></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Chat Modal -->
+  <div id="chat-modal-overlay">
+      <div class="chat-modal-container">
+          <div class="chat-header">
+              <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md shrink-0"><i class="fas fa-robot"></i></div>
+                  <div><h4 style="margin:0; font-weight:600; font-size:1rem;">EduBot AI</h4><span style="font-size:0.7rem; color:#6B7280; display:flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; background:#10B981; border-radius:50%;"></span> ตอบคำถามจากข้อมูลจริง</span></div>
+              </div>
+              <button onclick="toggleChatModal()" style="border:none; background:none; font-size:1.2rem; color:#9CA3AF; padding:8px;"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="chat-body" id="chat-box">
+              <div class="msg bot"><i class="fas fa-robot"></i><br>สวัสดีครับ ผมรู้ข้อมูลเกรดและงานค้างของคุณ อยากรู้วิชาไหนถามได้เลยครับ</div>
+          </div>
+          <div class="chat-footer">
+              <input type="text" id="chat-input" class="chat-input-new" placeholder="เช่น เกรดสังคม, งานค้างมีไหม" autocomplete="off" onkeydown="if(event.key==='Enter') sendChat()">
+              <button class="chat-btn-new" onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
+          </div>
+      </div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="nav-bar">
+    <button class="nav-btn active" onclick="navTo('home')"><i class="fas fa-th-large"></i> <span>หน้าหลัก</span></button>
+    <button class="nav-btn" onclick="navTo('grades')"><i class="fas fa-chart-pie"></i> <span>ผลเรียน</span></button>
+    <div class="nav-center"><button class="btn-ai" onclick="toggleChatModal()"><div class="ai-pulse"></div><i class="fas fa-comment-dots"></i></button></div>
+    <button class="nav-btn" onclick="navTo('tasks')"><i class="fas fa-clipboard-list"></i> <span>งาน</span></button>
+    <button class="nav-btn" onclick="navTo('profile')"><i class="fas fa-user"></i> <span>ข้อมูล</span></button>
+  </nav>
+
+  <script>
+    if (typeof CURRENT_USER === 'undefined') window.CURRENT_USER = null;
+    // --- GLOBAL DATA STORE ---
+    let STUDENT_DATA = { scores: {}, assignments: [], attendance: [], subjectMap: {} };
+    let ASSISTANT_ATTENDANCE_STATE = { students: [], scope: null };
+    const CACHE_KEY = 'eduverse_student_data';
+    const CACHE_USER_KEY = 'eduverse_user_profile';
+
+    function getStudentActiveTerm() {
+        if (STUDENT_DATA && STUDENT_DATA.term) return STUDENT_DATA.term;
+        if (CURRENT_USER && CURRENT_USER.term) return CURRENT_USER.term;
+        return 'current';
+    }
+
+    function getStudentCacheKey(prefix) {
+        const studentId = CURRENT_USER && CURRENT_USER.id ? CURRENT_USER.id : 'anonymous';
+        return `${prefix}_${studentId}_${getStudentActiveTerm()}`;
+    }
+
+    function safeEl(id) { return document.getElementById(id); }
+    function hasEl(id) { return !!safeEl(id); }
+    function setTextSafe(id, text) { const el = safeEl(id); if (el) el.innerText = text; }
+    function setHtmlSafe(id, html) { const el = safeEl(id); if (el) el.innerHTML = html; }
+
+    window.addEventListener('load', function() {
+        if (isAssistantStandaloneLink()) {
+            initAssistantStandalone();
+        } else if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+            initStudentDashboard();
+        } else {
+            console.warn("CURRENT_USER missing.");
+            setTimeout(() => { const loader = safeEl('global-loader'); if (loader) loader.classList.add('hidden'); }, 2000);
+        }
+    });
+
+    function getAssistantStandaloneParams() {
+        const params = new URLSearchParams(window.location.search || '');
+        const assistant = params.get('assistant') === '1' || params.get('mode') === 'assistant';
+        const uid = (params.get('uid') || params.get('sid') || '').trim();
+        if (!assistant || !uid) return null;
+        return {
+            uid,
+            term: (params.get('term') || '').trim(),
+            subject: (params.get('subject') || params.get('subjectCode') || '').trim(),
+            level: (params.get('level') || '').trim(),
+            room: (params.get('room') || '').trim()
+        };
+    }
+
+    function isAssistantStandaloneLink() {
+        return !!getAssistantStandaloneParams();
+    }
+
+    function setAssistantLoading(show, text) {
+        const loader = safeEl('global-loader');
+        const loaderText = loader ? loader.querySelector('p') : null;
+        if (loaderText && text) loaderText.innerText = text;
+        if (loader) loader.classList.toggle('hidden', !show);
+    }
+
+    function initAssistantStandalone() {
+        const link = getAssistantStandaloneParams();
+        if (!link) return;
+        setAssistantLoading(true, 'กำลังเปิดหน้าเช็คชื่อ...');
+        google.script.run
+            .withSuccessHandler(res => {
+                if (!res || !res.success || !res.user || res.user.role !== 'attendance_assistant') {
+                    setAssistantLoading(false);
+                    Swal.fire('เปิดลิงก์ไม่ได้', 'นักเรียนคนนี้ยังไม่ได้รับสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ', 'error');
+                    return;
+                }
+                CURRENT_USER = res.user;
+                CURRENT_USER.assistantLink = link;
+                renderUserProfile(CURRENT_USER);
+                setupAssistantAttendanceMode(link);
+            })
+            .withFailureHandler(err => {
+                setAssistantLoading(false);
+                Swal.fire('เปิดลิงก์ไม่ได้', String(err), 'error');
+            })
+            .loginSystem(link.uid, link.uid);
+    }
+
+    function setupAssistantAttendanceMode(link) {
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        const page = safeEl('p-assistant-attendance');
+        if (page) page.classList.add('active');
+        const nav = document.querySelector('.nav-bar');
+        if (nav) nav.style.display = 'none';
+        const main = document.querySelector('.main-container');
+        if (main) main.style.bottom = '0';
+        const refreshBtn = document.querySelector('header .btn-icon');
+        if (refreshBtn) refreshBtn.setAttribute('onclick', 'assistantLoadAttendance(true)');
+
+        const today = new Date();
+        const dateEl = safeEl('assistant-att-date');
+        if (dateEl && !dateEl.value) {
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            dateEl.value = `${yyyy}-${mm}-${dd}`;
+        }
+
+        const scope = Array.isArray(CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
+        const select = safeEl('assistant-subject-select');
+        if (select) {
+            const options = scope.map((s, idx) => {
+                const selected = link.subject && String(s.subjectCode) === String(link.subject) && String(s.level) === String(link.level) && String(s.room) === String(link.room);
+                return `<option value="${idx}" ${selected ? 'selected' : ''}>${s.subjectCode} | ${s.level}/${s.room}</option>`;
+            }).join('');
+            select.innerHTML = options || '<option value="">ไม่มีสิทธิ์เช็คชื่อ</option>';
+        }
+        assistantLoadAttendance(true);
+    }
+
+    function getAssistantSelectedScope() {
+        const scopeList = Array.isArray(CURRENT_USER && CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
+        const select = safeEl('assistant-subject-select');
+        const index = select ? parseInt(select.value, 10) : 0;
+        return scopeList[index] || scopeList[0] || null;
+    }
+
+    function assistantLoadAttendance(showLoader) {
+        const scope = getAssistantSelectedScope();
+        const list = safeEl('assistant-attendance-list');
+        if (!scope) {
+            if (list) list.innerHTML = '<div class="text-center text-red-400 py-10">ไม่มีสิทธิ์เช็คชื่อ</div>';
+            setAssistantLoading(false);
+            return;
+        }
+        ASSISTANT_ATTENDANCE_STATE.scope = scope;
+        const date = safeEl('assistant-att-date') ? safeEl('assistant-att-date').value : '';
+        const classLabel = safeEl('assistant-class-label');
+        if (classLabel) classLabel.innerText = `${scope.level}/${scope.room}`;
+        if (!date) return;
+        if (showLoader) setAssistantLoading(true, 'กำลังโหลดรายชื่อ...');
+        if (list) list.innerHTML = '<div class="text-center text-gray-400 py-10">กำลังโหลดรายชื่อ...</div>';
+        google.script.run
+            .withSuccessHandler(res => {
+                setAssistantLoading(false);
+                if (!res || !res.success) {
+                    if (list) list.innerHTML = `<div class="text-center text-red-400 py-10">${res && res.message ? res.message : 'โหลดไม่สำเร็จ'}</div>`;
+                    return;
+                }
+                ASSISTANT_ATTENDANCE_STATE.students = res.students || [];
+                renderAssistantAttendanceList();
+            })
+            .withFailureHandler(err => {
+                setAssistantLoading(false);
+                if (list) list.innerHTML = `<div class="text-center text-red-400 py-10">${String(err)}</div>`;
+            })
+            .getAttendanceForCheck({
+                date,
+                subject: scope.subjectCode,
+                subjectCode: scope.subjectCode,
+                level: scope.level,
+                room: scope.room,
+                term: scope.term,
+                user: CURRENT_USER
+            });
+    }
+
+    function renderAssistantAttendanceList() {
+        const list = safeEl('assistant-attendance-list');
+        if (!list) return;
+        const students = ASSISTANT_ATTENDANCE_STATE.students || [];
+        if (!students.length) {
+            list.innerHTML = '<div class="text-center text-gray-400 py-10">ไม่พบรายชื่อนักเรียนในห้องนี้</div>';
+            return;
+        }
+        const statuses = ['มา', 'สาย', 'ลา', 'ขาด'];
+        list.innerHTML = students.map(s => {
+            const current = s.attStatus || 'มา';
+            const name = `${s.prefix || ''}${s.first || ''} ${s.last || ''}`.trim();
+            const buttons = statuses.map(st => {
+                const active = current === st;
+                const bg = active ? (st === 'ขาด' ? '#DC2626' : st === 'ลา' ? '#2563EB' : st === 'สาย' ? '#F59E0B' : '#16A34A') : '#F3F4F6';
+                const color = active ? 'white' : '#64748B';
+                return `<button onclick="assistantSetStatus('${s.id}','${st}')" style="border:none; border-radius:12px; padding:8px 0; font-family:Prompt; font-weight:700; background:${bg}; color:${color};">${st}</button>`;
+            }).join('');
+            return `<div style="background:white; border-radius:18px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,0.03);">
+                <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:10px;">
+                  <div><div style="font-weight:700;">${s.no || '-'} ${name}</div><div style="font-size:0.72rem; color:#94A3B8;">${s.id}</div></div>
+                  <div style="font-size:0.72rem; color:#64748B;">${s.attRecorder ? 'บันทึกแล้ว' : ''}</div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">${buttons}</div>
+                <input value="${s.attNote || ''}" onchange="assistantSetNote('${s.id}', this.value)" placeholder="หมายเหตุ..." style="width:100%; margin-top:10px; border:1px solid #E5E7EB; border-radius:12px; padding:9px; font-family:Prompt; font-size:0.82rem;">
+              </div>`;
+        }).join('');
+    }
+
+    function assistantSetStatus(studentId, status) {
+        const student = (ASSISTANT_ATTENDANCE_STATE.students || []).find(s => String(s.id) === String(studentId));
+        if (!student) return;
+        student.attStatus = status;
+        student.isChecked = true;
+        renderAssistantAttendanceList();
+    }
+
+    function assistantSetNote(studentId, note) {
+        const student = (ASSISTANT_ATTENDANCE_STATE.students || []).find(s => String(s.id) === String(studentId));
+        if (!student) return;
+        student.attNote = note;
+        student.isChecked = true;
+    }
+
+    function assistantSaveAllAttendance() {
+        const scope = ASSISTANT_ATTENDANCE_STATE.scope || getAssistantSelectedScope();
+        const date = safeEl('assistant-att-date') ? safeEl('assistant-att-date').value : '';
+        const students = ASSISTANT_ATTENDANCE_STATE.students || [];
+        if (!scope || !date || !students.length) {
+            Swal.fire('เตือน', 'กรุณาโหลดรายชื่อก่อนบันทึก', 'warning');
+            return;
+        }
+        const records = students.map(s => ({ id: s.id, status: s.attStatus || 'มา', note: s.attNote || '' }));
+        setAssistantLoading(true, 'กำลังบันทึก...');
+        google.script.run
+            .withSuccessHandler(res => {
+                setAssistantLoading(false);
+                if (!res || !res.success) {
+                    Swal.fire('บันทึกไม่สำเร็จ', res && res.message ? res.message : 'Server error', 'error');
+                    return;
+                }
+                Swal.fire({ icon: 'success', title: 'บันทึกเรียบร้อย', timer: 1200, showConfirmButton: false });
+                assistantLoadAttendance(false);
+            })
+            .withFailureHandler(err => {
+                setAssistantLoading(false);
+                Swal.fire('บันทึกไม่สำเร็จ', String(err), 'error');
+            })
+            .saveAttendance({
+                date,
+                subject: scope.subjectCode,
+                level: scope.level,
+                room: scope.room,
+                term: scope.term,
+                recorder: CURRENT_USER ? CURRENT_USER.name : 'ผู้ช่วยเช็คชื่อ',
+                records,
+                user: CURRENT_USER
+            });
+    }
+
+    function initStudentDashboard(forceRefresh = false) {
+        if (!CURRENT_USER) return;
+        renderUserProfile(CURRENT_USER);
+        const cachedData = localStorage.getItem(getStudentCacheKey(CACHE_KEY));
+        if (cachedData && !forceRefresh) {
+            try {
+                STUDENT_DATA = JSON.parse(cachedData);
+                updateDashboardUI();
+            } catch (e) { localStorage.removeItem(getStudentCacheKey(CACHE_KEY)); }
+            const cachedProfile = localStorage.getItem(getStudentCacheKey(CACHE_USER_KEY));
+            if(cachedProfile) {
+                try {
+                    const p = JSON.parse(cachedProfile);
+                    if(p.id === CURRENT_USER.id) syncUserProfile(p, false);
+                } catch(e) {}
+            }
+        }
+        fetchStudentData(forceRefresh);
+    }
+
+    function renderUserProfile(user) {
+        const userName = safeEl('user-name'); if (userName) userName.innerText = user.name || 'นักเรียน';
+        const profileName = safeEl('profile-name'); if (profileName) profileName.innerText = user.name || '-';
+        const profileId = safeEl('profile-id'); if (profileId) profileId.innerText = user.id || '-';
+        const classStr = (user.level && user.room) ? `ม.${user.level}/${user.room}` : 'กำลังโหลด...';
+        const userClass = safeEl('user-class'); if (userClass) userClass.innerText = classStr;
+        const profileRoom = safeEl('profile-room'); if (profileRoom) profileRoom.innerText = classStr;
+        const statIdCard = safeEl('stat-id-card'); if(user.id && statIdCard) statIdCard.innerText = user.id;
+        if(user.imageUrl) {
+            const userAvatar = safeEl('user-avatar'); if (userAvatar) userAvatar.src = user.imageUrl;
+            const profileImg = safeEl('profile-img-lg'); if (profileImg) profileImg.src = user.imageUrl;
+        }
+    }
+
+    function syncUserProfile(fullData, saveToCache = true) {
+        if (fullData.level) CURRENT_USER.level = fullData.level;
+        if (fullData.room) CURRENT_USER.room = fullData.room;
+        if (fullData.name) CURRENT_USER.name = fullData.name;
+        if (fullData.term) CURRENT_USER.term = fullData.term;
+        renderUserProfile(CURRENT_USER);
+        if(saveToCache) localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
+    }
+
+    function fetchStudentData(refresh = false) {
+        const loader = document.getElementById('global-loader');
+        const refreshIcon = document.getElementById('refresh-icon');
+        if(refresh && loader) loader.classList.remove('hidden');
+        if(refreshIcon) refreshIcon.classList.add('fa-spin');
+
+        google.script.run.withSuccessHandler(res => {
+            if(loader) loader.classList.add('hidden');
+            if(refreshIcon) refreshIcon.classList.remove('fa-spin');
+            if (res && res.success) {
+                processData(res.data);
+                showToast('อัปเดตข้อมูลล่าสุดแล้ว');
+            }
+        }).withFailureHandler(err => {
+            if(loader) loader.classList.add('hidden');
+            if(refreshIcon) refreshIcon.classList.remove('fa-spin');
+            showToast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+        }).getStudentModeData(CURRENT_USER.id, CURRENT_USER);
+    }
+
+    function processData(data) {
+        if (data.profile) {
+            const p = data.profile;
+            const fullName = `${p.prefix}${p.first} ${p.last}`;
+            syncUserProfile({ level: p.level, room: p.room, name: fullName, term: p.term || data.term });
+        }
+        
+        const myAssignments = [];
+        if (data.assignments) {
+            data.assignments.forEach(asn => {
+                const key = `${asn.id}_${CURRENT_USER.id}`;
+                const scoreRecord = data.scores ? data.scores[key] : null;
+                
+                // Get Full Subject Info
+                let subjectInfo = `${asn.subject}`;
+                let teacherName = "-";
+                if (data.subjectMap && data.subjectMap[asn.subject]) {
+                    const sm = data.subjectMap[asn.subject];
+                    subjectInfo = `${asn.subject} ${sm.name}`; // Format: Code Name
+                    teacherName = sm.teacher;
+                }
+                
+                // Parse Title if it has description (Title:::Desc)
+                let titleDisplay = asn.title;
+                if(asn.title && asn.title.includes(':::')) {
+                    titleDisplay = asn.title.split(':::')[0];
+                }
+                
+                myAssignments.push({
+                    ...asn,
+                    title: titleDisplay, // Use clean title
+                    subjectDisplay: subjectInfo,
+                    teacher: teacherName,
+                    myScore: scoreRecord ? scoreRecord.score : undefined,
+                    isSubmitted: scoreRecord ? (scoreRecord.isSubmitted == 1 || scoreRecord.isSubmitted === true) : false
+                });
+            });
+        }
+
+        let present=0, late=0, leave=0, absent=0;
+        if (data.attendance) {
+            data.attendance.forEach(att => {
+                if (att.status === 'มา') present++;
+                else if (att.status === 'สาย') late++;
+                else if (att.status === 'ลา') leave++;
+                else if (att.status === 'ขาด') absent++;
+            });
+        }
+
+        STUDENT_DATA = {
+            assignments: myAssignments || [],
+            attendance: data.attendance || [],
+            stats: { present, late, leave, absent },
+            subjectMap: data.subjectMap || {},
+            term: data.term || getStudentActiveTerm()
+        };
+        if (data.term) CURRENT_USER.term = data.term;
+        localStorage.setItem(getStudentCacheKey(CACHE_KEY), JSON.stringify(STUDENT_DATA));
+        updateDashboardUI();
+    }
+
+    function updateDashboardUI() {
+        const d = STUDENT_DATA;
+        if (!d.assignments) d.assignments = [];
+        
+        // --- HOME STATS ---
+        const totalAtt = d.stats.present + d.stats.late + d.stats.leave + d.stats.absent;
+        const attPercent = totalAtt > 0 ? Math.round(((d.stats.present + d.stats.late) / totalAtt) * 100) : 0;
+        setTextSafe('stat-attendance', totalAtt > 0 ? `${attPercent}%` : '-');
+        
+        const pending = d.assignments.filter(a => !a.isSubmitted).length;
+        setTextSafe('stat-pending', pending);
+        const pendingTrend = safeEl('stat-pending-trend');
+        if (pendingTrend) {
+            pendingTrend.innerText = pending > 0 ? `${pending} งานค้าง` : 'เยี่ยมมาก!';
+            pendingTrend.style.color = pending > 0 ? '#C2410C' : '#10B981';
+        }
+
+        // Hero Card
+        if (pending > 0) {
+            const nextWork = d.assignments.find(a => !a.isSubmitted);
+            setTextSafe('hero-title', nextWork.subjectDisplay);
+            setTextSafe('hero-subtitle', `${nextWork.title} (ค้างส่ง)`);
+            const heroTerm = safeEl('hero-term');
+            if (heroTerm) { heroTerm.innerText = 'ด่วน'; heroTerm.style.background = 'rgba(239, 68, 68, 0.3)'; }
+        } else {
+            setTextSafe('hero-title', "งานครบแล้ว");
+            setTextSafe('hero-subtitle', "ไม่มีงานค้างส่ง");
+            const heroTerm = safeEl('hero-term');
+            if (heroTerm) { heroTerm.innerText = 'ล่าสุด'; heroTerm.style.background = 'rgba(255,255,255,0.25)'; }
+        }
+
+        // --- TASKS RENDER ---
+        const tasksContainer = safeEl('tasks-container');
+        if (!tasksContainer) return;
+        tasksContainer.innerHTML = '';
+        if (d.assignments.length === 0) {
+            tasksContainer.innerHTML = `<div class="text-center p-10 text-gray-400 opacity-60"><i class="fas fa-clipboard-check text-4xl mb-3"></i><br>ไม่มีงานในระบบ</div>`;
+        } else {
+            // Sort: Pending first
+            const sortedAsn = [...d.assignments].sort((a,b) => (a.isSubmitted === b.isSubmitted) ? 0 : a.isSubmitted ? 1 : -1);
+            sortedAsn.forEach(a => {
+                const isLate = !a.isSubmitted && new Date(a.dueDate) < new Date();
+                let statusClass = a.isSubmitted ? '' : (isLate ? 'missing' : 'pending');
+                let statusText = a.isSubmitted ? 'ส่งแล้ว' : (isLate ? 'ขาดส่ง' : 'รอส่ง');
+                let icon = a.isSubmitted ? 'fa-check' : 'fa-exclamation';
+                let iconBg = a.isSubmitted ? '#DCFCE7' : '#FFEDD5';
+                let iconColor = a.isSubmitted ? '#166534' : '#C2410C';
+                
+                // DISPLAY SCORE LOGIC
+                let scoreText = '';
+                if (a.myScore !== undefined && a.myScore !== null && a.myScore !== '') {
+                    // Has Score -> Show Score/Max
+                    scoreText = `<span style="font-size:0.9rem; color:#166534; font-weight:bold;">${a.myScore}</span><span style="font-size:0.7rem; color:#9CA3AF;">/${a.maxScore}</span>`;
+                } else if (a.isSubmitted) {
+                    // Submitted but no score -> "Waiting"
+                    scoreText = `<span style="font-size:0.75rem; color:#2563EB;">รอตรวจ</span>`;
+                } else {
+                    // Not submitted
+                    scoreText = `<span style="font-size:0.75rem; color:${isLate?'#DC2626':'#F59E0B'};">${isLate?'ขาดส่ง':'รอส่ง'}</span>`;
+                }
+
+                tasksContainer.innerHTML += `
+                <div class="task-item">
+                    <div class="task-icon" style="background:${iconBg}; color:${iconColor};"><i class="fas ${icon}"></i></div>
+                    <div style="flex:1; overflow:hidden;">
+                        <b style="font-size:0.9rem; color:#374151; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${a.subjectDisplay}</b>
+                        <span style="font-size:0.75rem; color:#6B7280; display:block;">${a.title}</span>
+                        <span style="font-size:0.65rem; color:#9CA3AF; display:block;">ผู้สอน ${a.teacher}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="task-status ${statusClass}" style="display:inline-block; margin-bottom:4px;">${statusText}</span>
+                        <div style="line-height:1;">${scoreText}</div>
+                    </div>
+                </div>`;
+            });
+        }
+
+        // --- ATTENDANCE RENDER (Detailed List) ---
+        const attContainer = safeEl('attendance-list-container');
+        if (!attContainer) return;
+        attContainer.innerHTML = '';
+        if (!d.attendance || d.attendance.length === 0) {
+            attContainer.innerHTML = `<div class="text-center text-gray-400 py-10">ไม่พบประวัติการขาดเรียน</div>`;
+        } else {
+            [...d.attendance].reverse().forEach(att => {
+                let color = att.status == 'มา' ? '#10B981' : (att.status == 'ขาด' ? '#EF4444' : '#F59E0B');
+                let attSubj = att.subject;
+                let attTeacher = '';
+                if(d.subjectMap && d.subjectMap[att.subject]) {
+                    attSubj = `${att.subject} ${d.subjectMap[att.subject].name}`;
+                    attTeacher = `ผู้สอน ${d.subjectMap[att.subject].teacher}`;
+                }
+
+                attContainer.innerHTML += `
+                <div style="background:white; padding:12px; border-radius:12px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.02);">
+                    <div>
+                        <div style="font-size:0.9rem; font-weight:600;">${att.date}</div>
+                        <div style="font-size:0.75rem; color:gray;">${attSubj}</div>
+                        <div style="font-size:0.65rem; color:#9CA3AF;">${attTeacher}</div>
+                    </div>
+                    <span style="background:${color}20; color:${color}; padding:4px 10px; border-radius:6px; font-size:0.8rem; font-weight:600;">${att.status}</span>
+                </div>`;
+            });
+        }
+
+        updateChart();
+    }
+
+    function updateChart() {
+        const chartEl = safeEl('scoreChart');
+        if (!chartEl) return;
+        const ctx = chartEl.getContext('2d');
+        const subjects = {};
+        STUDENT_DATA.assignments.forEach(a => {
+            if (a.myScore !== undefined && !isNaN(a.myScore)) {
+                if (!subjects[a.subjectCode]) subjects[a.subjectCode] = { name: a.subjectName, got: 0, max: 0 };
+                subjects[a.subjectCode].got += Number(a.myScore);
+                subjects[a.subjectCode].max += Number(a.maxScore);
+            }
+        });
+
+        const labels = Object.values(subjects).map(s => s.name ? s.name.substring(0, 10)+'...' : 'วิชา');
+        const data = Object.values(subjects).map(s => s.max > 0 ? Math.round((s.got / s.max) * 100) : 0);
+
+        if (data.length > 0) {
+            const avg = data.reduce((a,b) => a+b, 0) / data.length;
+            setTextSafe('stat-score-avg', avg.toFixed(0) + '%');
+        }
+
+        const listContainer = safeEl('grade-list-container');
+        if (!listContainer) return;
+        listContainer.innerHTML = '';
+        const gradedAsn = STUDENT_DATA.assignments.filter(a => a.myScore !== undefined && !isNaN(a.myScore));
+        
+        if(gradedAsn.length === 0) listContainer.innerHTML = `<div class="text-center text-gray-400 text-sm py-4">ยังไม่มีคะแนน</div>`;
+        else {
+            gradedAsn.slice(-5).reverse().forEach(a => {
+                const percent = (Number(a.myScore) / Number(a.maxScore)) * 100;
+                const color = percent >= 50 ? '#2563EB' : '#DC2626';
+                listContainer.innerHTML += `
+                <div class="task-item" style="padding: 12px;">
+                    <div class="task-icon" style="width:40px; height:40px; font-size:1rem; background:#EEF2FF;"><i class="fas fa-star"></i></div>
+                    <div style="flex:1;">
+                        <b style="font-size:0.85rem;">${a.subjectDisplay}</b>
+                        <span style="display:block; font-size:0.75rem; color:gray;">${a.title}</span>
+                        <span style="font-size:0.65rem; color:#9CA3AF; display:block;">ผู้สอน ${a.teacher}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <b style="font-size:1rem; color:${color};">${a.myScore}/${a.maxScore}</b>
+                    </div>
+                </div>`;
+            });
+        }
+
+        if (window.myScoreChart) window.myScoreChart.destroy();
+        window.myScoreChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ label: 'คะแนน (%)', data: data, backgroundColor: '#2563EB', borderRadius: 6 }] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
+        });
+    }
+
+    // --- EDIT PROFILE NAME ---
+    async function editProfileName() {
+        const { value: text } = await Swal.fire({
+            title: 'แก้ไขชื่อ-สกุล',
+            input: 'text',
+            inputValue: CURRENT_USER.name,
+            showCancelButton: true,
+            confirmButtonText: 'บันทึก',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (text) {
+            showToast('กำลังบันทึกชื่อ...');
+            // Mock update locally first
+            CURRENT_USER.name = text;
+            renderUserProfile(CURRENT_USER);
+            
+            // Send to backend
+            const parts = text.split(' ');
+            const prefix = ''; // Simplification
+            const first = parts[0] || '';
+            const last = parts.slice(1).join(' ') || '';
+            
+            google.script.run.withSuccessHandler(res => {
+                if(res.success) {
+                    showToast('บันทึกชื่อเรียบร้อย');
+                    localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
+                } else showToast('บันทึกไม่สำเร็จ');
+            }).saveUserProfile({ id: CURRENT_USER.id, name: text, prefix: prefix, firstName: first, lastName: last }, null);
+        }
+    }
+
+    function uploadProfileImage(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 300;
+                    const scaleSize = MAX_WIDTH / img.width;
+                    canvas.width = MAX_WIDTH;
+                    canvas.height = img.height * scaleSize;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+                    
+                    const profileImg = safeEl('profile-img-lg'); if (profileImg) profileImg.src = e.target.result;
+                    const userAvatar = safeEl('user-avatar'); if (userAvatar) userAvatar.src = e.target.result;
+                    showToast('กำลังอัปโหลดรูป...');
+                    
+                    google.script.run.withSuccessHandler(res => {
+                        if(res.success) {
+                            CURRENT_USER.imageUrl = res.imageUrl;
+                            localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
+                            showToast('บันทึกรูปโปรไฟล์แล้ว');
+                        } else showToast('อัปโหลดไม่สำเร็จ');
+                    }).saveUserProfile(CURRENT_USER, base64);
+                }
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function navTo(pageId) {
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        const page = safeEl('p-' + pageId);
+        if (page) page.classList.add('active');
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+        const btns = document.querySelectorAll('.nav-btn');
+        if (pageId === 'home' && btns[0]) btns[0].classList.add('active');
+        if (pageId === 'grades' && btns[1]) btns[1].classList.add('active');
+        if (pageId === 'tasks' && btns[2]) btns[2].classList.add('active');
+        if (pageId === 'profile' && btns[3]) btns[3].classList.add('active');
+    }
+
+    function toggleChatModal() {
+        const overlay = safeEl('chat-modal-overlay');
+        if (!overlay) return;
+        if (overlay.classList.contains('active')) {
+            overlay.classList.remove('active');
+            setTimeout(() => { overlay.style.display = 'none'; }, 300);
+        } else {
+            overlay.style.display = 'flex';
+            requestAnimationFrame(() => overlay.classList.add('active'));
+            setTimeout(() => { const input = safeEl('chat-input'); if (input) input.focus(); }, 100);
+        }
+    }
+    const chatOverlay = safeEl('chat-modal-overlay');
+    if (chatOverlay) chatOverlay.addEventListener('click', function(e) { if (e.target === this) toggleChatModal(); });
+
+    function sendChat() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if(!text) return;
+        addMsg(text, 'user');
+        input.value = '';
+        const msgId = 'bot-' + Date.now();
+        const chatBox = document.getElementById('chat-box');
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = msgId;
+        loadingDiv.className = 'msg bot';
+        loadingDiv.innerHTML = '<i class="fas fa-ellipsis-h fa-beat"></i>';
+        chatBox.appendChild(loadingDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        const context = { level: CURRENT_USER.level || '', room: CURRENT_USER.room || '', subject: 'General' };
+        google.script.run.withSuccessHandler(res => {
+            const msgEl = document.getElementById(msgId);
+            if (res.success) msgEl.innerHTML = res.response.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+            else msgEl.innerHTML = '<span style="color:red;">ขออภัย ระบบขัดข้องชั่วคราว</span>';
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }).aiGeneralChat(`ข้อมูลของนักเรียนชื่อ ${CURRENT_USER.name}: ${text}`, context);
+    }
+
+    function addMsg(text, sender) {
+        const box = document.getElementById('chat-box');
+        const div = document.createElement('div');
+        div.className = `msg ${sender}`;
+        div.innerHTML = text;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function logout() {
+        Swal.fire({ title: 'ออกจากระบบ?', icon: 'warning', showCancelButton: true, confirmButtonText: 'ใช่', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#DC2626' }).then((result) => {
+            if (result.isConfirmed) {
+                localStorage.removeItem(getStudentCacheKey(CACHE_KEY));
+                localStorage.removeItem(getStudentCacheKey(CACHE_USER_KEY));
+                window.location.reload(); 
+            }
+        });
+    }
+
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        document.getElementById('toast-msg').innerText = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+  </script>
+</body>
+</html>
