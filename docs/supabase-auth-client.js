@@ -16,6 +16,20 @@
   const readSession = () => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { return null; }
   };
+  const base64Url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const createVerifier = () => base64Url(crypto.getRandomValues(new Uint8Array(32)));
+  const createChallenge = async (verifier) => base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const exchangeCode = async (code) => {
+    const verifier = sessionStorage.getItem('wrk_supabase_pkce_verifier');
+    if (!verifier) return null;
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+      method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auth_code: code, code_verifier: verifier })
+    });
+    sessionStorage.removeItem('wrk_supabase_pkce_verifier');
+    if (!response.ok) return null;
+    return writeSession(await response.json());
+  };
   const writeSession = (session) => {
     if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
     else localStorage.removeItem(STORAGE_KEY);
@@ -31,6 +45,11 @@
     return writeSession(await response.json());
   };
   window.supabaseAuthReady = async function () {
+    const query = new URLSearchParams(window.location.search || '');
+    if (query.get('code')) {
+      await exchangeCode(query.get('code'));
+      history.replaceState({}, document.title, window.location.pathname);
+    }
     const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
     if (hash.get('access_token')) {
       const expiresIn = Number(hash.get('expires_in') || 3600);
@@ -47,11 +66,16 @@
   };
   window.supabaseSignInWithGoogle = async function () {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const verifier = createVerifier();
+    sessionStorage.setItem('wrk_supabase_pkce_verifier', verifier);
+    const challenge = await createChallenge(verifier);
     const url = new URL(`${SUPABASE_URL}/auth/v1/authorize`);
     url.searchParams.set('provider', 'google');
     url.searchParams.set('redirect_to', redirectTo);
     url.searchParams.set('apikey', PUBLIC_KEY);
     url.searchParams.set('prompt', 'select_account');
+    url.searchParams.set('code_challenge', challenge);
+    url.searchParams.set('code_challenge_method', 'S256');
     window.location.assign(url.toString());
   };
   window.supabaseSignOut = async function () {
