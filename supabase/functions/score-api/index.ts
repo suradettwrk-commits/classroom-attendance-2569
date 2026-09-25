@@ -56,9 +56,32 @@ const termIdFor = async (value: unknown) => {
 };
 async function authenticate(request: Request) {
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("ไม่พบ Firebase Login Token");
-  const verified = await jwtVerify(token, FIREBASE_JWKS, { issuer: `https://securetoken.google.com/${PROJECT_ID}`, audience: PROJECT_ID });
-  const email = text(verified.payload.email).toLowerCase();
+  if (!token) throw new Error("ไม่พบ Login Token");
+
+  // Supabase Auth is the target identity provider. Validate its access token
+  // through GoTrue first; this avoids relying on a JWT secret in the client
+  // and gives us the canonical email returned by Supabase Auth.
+  let email = "";
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` },
+    });
+    if (response.ok) {
+      const user = await response.json();
+      email = text(user?.email).toLowerCase();
+    }
+  } catch (_) {
+    // Keep the Firebase compatibility path below during the migration window.
+  }
+
+  // Compatibility path: existing deployed builds still obtain Firebase
+  // tokens. It remains enabled until the Supabase Auth build passes login,
+  // role checks, and score CRUD verification.
+  if (!email) {
+    const verified = await jwtVerify(token, FIREBASE_JWKS, { issuer: `https://securetoken.google.com/${PROJECT_ID}`, audience: PROJECT_ID });
+    email = text(verified.payload.email).toLowerCase();
+  }
+  if (!email) throw new Error("ไม่พบอีเมลใน Login Token");
   if (email === ADMIN_EMAIL) return { admin: true, teacherId: "admin" };
   const profiles = await api(`auth_profiles?select=legacy_user_id,role,status&email=eq.${enc(email)}&limit=10`);
   const profile = profiles.find((p: any) => text(p.status).toLowerCase() === "active" && text(p.role).toLowerCase() === "teacher");
