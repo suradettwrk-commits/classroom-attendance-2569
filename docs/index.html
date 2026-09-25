@@ -1488,6 +1488,46 @@
 
 </script>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* Supabase Auth bridge for the static build. The publishable key is safe to
+ * expose in browser code; no service-role or secret key belongs here. */
+(function () {
+  const client = window.__SUPABASE_CLIENT = window.supabase.createClient(
+    'https://jvyxnsokfpnepshyyzpg.supabase.co',
+    'sb_publishable_oTJWgjNgk8Oe9i8kaAUaDw_sloavHyq',
+    { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
+  );
+  let currentUser = null;
+  window.__SUPABASE_AUTH_USER = null;
+  window.__AUTH_EMAIL = '';
+  const publish = (session) => {
+    currentUser = session?.user || null;
+    window.__SUPABASE_AUTH_USER = currentUser;
+    window.__AUTH_EMAIL = String(currentUser?.email || '').trim().toLowerCase();
+    return session || null;
+  };
+  window.supabaseAuthReady = async function () {
+    const { data } = await client.auth.getSession();
+    return publish(data?.session || null);
+  };
+  window.supabaseSignInWithGoogle = async function () {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await client.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo, queryParams: { prompt: 'select_account' } }
+    });
+    if (error) throw error;
+  };
+  window.supabaseSignOut = async function () {
+    await client.auth.signOut();
+    publish(null);
+  };
+  client.auth.onAuthStateChange((_event, session) => publish(session));
+  window.__SUPABASE_AUTH_READY = window.supabaseAuthReady();
+})();
+
+</script>
 <script>
 /* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
 (function () {
@@ -1496,7 +1536,7 @@
   if (!originalRun) return;
   const supabaseMethods = new Set(['loadScoresGrid', 'saveScoresBatch', 'getInitialDropdowns', 'getInitialSystemData', 'getDashboardStats', 'getCurrentUserProfile']);
   const getAccessToken = async () => {
-    const supabase = window.supabase || window.__SUPABASE_CLIENT;
+    const supabase = window.__SUPABASE_CLIENT || window.supabase;
     if (supabase?.auth?.getSession) {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.access_token) return data.session.access_token;
@@ -1538,7 +1578,8 @@
   window.google.script.run = proxy;
 })();
 
-</script></head>
+</script>
+</head>
 <body class="h-screen overflow-hidden text-slate-800">
 
     <div id="loading-overlay" class="fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center hidden">
@@ -10500,37 +10541,24 @@ var DATA_CONTROLLER = new DataController();
         window.__AUTH_READY_STATE = 'pending';
         const SESSION_KEY = 'wrk_school_session'; // Define session key
 
-        // Do not initialize the app before the Firebase bridge and Auth
-        // persistence are ready. Otherwise a restored teacher session can be
-        // mistaken for an anonymous user and all reads/writes appear denied.
+        // Do not initialize the app before both compatibility bridges and
+        // Supabase Auth session restoration are ready.
         window.onload = function() {
             waitForBackendReady();
         };
 
         function waitForBackendReady(attempt = 0) {
             const bridgeReady = !!(window.google && google.script && google.script.run);
+            const authReady = !!window.supabaseAuthReady;
             const firebaseReady = !!(window.firebase && firebase.auth);
-            if (bridgeReady && firebaseReady) {
+            if (bridgeReady && firebaseReady && authReady) {
                 if (!window.__authBootstrapPromise) {
-                    window.__authBootstrapPromise = new Promise((resolve) => {
-                        let settled = false;
-                        let unsubscribe = null;
-                        const finish = (user) => {
-                            if (settled) return;
-                            settled = true;
-                            if (unsubscribe) unsubscribe();
-                            resolve(user || null);
-                        };
-                        const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
-                        unsubscribe = firebase.auth().onAuthStateChanged((user) => {
-                            clearTimeout(timeout);
-                            finish(user);
-                        });
-                    });
+                    window.__authBootstrapPromise = window.supabaseAuthReady();
                 }
-                window.__authBootstrapPromise.then((user) => {
-                    window.__FIREBASE_AUTH_USER = user || null;
-                    window.__AUTH_READY_STATE = user ? (user.isAnonymous ? 'anonymous' : 'authenticated') : 'missing';
+                window.__authBootstrapPromise.then((session) => {
+                    const user = session?.user || window.__SUPABASE_AUTH_USER || null;
+                    window.__FIREBASE_AUTH_USER = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+                    window.__AUTH_READY_STATE = user ? 'authenticated' : 'missing';
                     checkSession();
                 });
                 return;
@@ -10638,14 +10666,15 @@ var DATA_CONTROLLER = new DataController();
                 const localRole = String(localUser.role || '').toLowerCase();
                 const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(localRole);
                 const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-                const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
+                const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
+                const authEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
                 const adminEmail = 'suradet.t@wrk.ac.th';
-                const emailMismatch = staffRole && firebaseUser && (
+                const emailMismatch = staffRole && identityUser && (
                     (localRole === 'admin' && authEmail !== adminEmail) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
                 );
-                if (staffRole && (!firebaseUser || firebaseUser.isAnonymous || emailMismatch)) {
+                if (staffRole && (!identityUser || (identityUser.isAnonymous && !window.__SUPABASE_AUTH_USER) || emailMismatch)) {
                     clearSession();
                     setLoading(false);
                     showLogin();
@@ -10684,8 +10713,20 @@ var DATA_CONTROLLER = new DataController();
                     clearSession();
                     showLogin();
                 }
+            } else if (window.__SUPABASE_AUTH_USER && google.script.run.getCurrentUserProfile) {
+                setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
+                google.script.run
+                    .withSuccessHandler((serverUser) => {
+                        setLoading(false);
+                        const normalizedUser = (serverUser && serverUser.success && serverUser.data) ? serverUser.data : serverUser;
+                        if (!normalizedUser || !normalizedUser.id) { showLogin(); return; }
+                        CURRENT_USER = normalizedUser;
+                        saveSession(CURRENT_USER);
+                        renderAppByRole();
+                    })
+                    .withFailureHandler((err) => { setLoading(false); showLogin(); console.warn('Supabase profile sync failed', err); })
+                    .getCurrentUserProfile(window.__AUTH_EMAIL);
             } else {
-                // ไม่มี Session -> ไปหน้า Login
                 showLogin();
             }
         }
@@ -10698,15 +10739,7 @@ var DATA_CONTROLLER = new DataController();
         async function handleAdminGoogleLogin() {
             try {
                 setLoading(true, 'กำลังตรวจสอบบัญชี Google...');
-                const result = await window.firebaseSignInWithGoogle();
-                setLoading(false);
-                if (result.needsSetup) {
-                    Swal.fire('ยังไม่มีสิทธิ์ใช้งาน', `อีเมล ${result.email || ''} ยังไม่ได้เพิ่มโดยผู้ดูแลระบบ กรุณาให้แอดมินเพิ่มอีเมลนี้ใน Users ก่อน`, 'error');
-                    return;
-                }
-                CURRENT_USER = result.user;
-                saveSession(CURRENT_USER);
-                    renderAppByRole();
+                await window.supabaseSignInWithGoogle();
             } catch (error) {
                 setLoading(false);
                 Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
@@ -10779,10 +10812,11 @@ var DATA_CONTROLLER = new DataController();
         function renderAppByRole() {
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-            const firebaseEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
+            const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
+            const identityEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
             const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
-                firebaseUser && !firebaseUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
+                identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && ((role === 'admin' && identityEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === identityEmail))
             );
             if (!identityOk) {
                 clearSession();

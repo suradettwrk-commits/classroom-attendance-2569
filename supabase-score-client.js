@@ -5,7 +5,7 @@
   if (!originalRun) return;
   const supabaseMethods = new Set(['loadScoresGrid', 'saveScoresBatch', 'getInitialDropdowns', 'getInitialSystemData', 'getDashboardStats', 'getCurrentUserProfile']);
   const getAccessToken = async () => {
-    const supabase = window.supabase || window.__SUPABASE_CLIENT;
+    const supabase = window.__SUPABASE_CLIENT || window.supabase;
     if (supabase?.auth?.getSession) {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.access_token) return data.session.access_token;
