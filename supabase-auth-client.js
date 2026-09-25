@@ -1,11 +1,9 @@
-/* Supabase Auth bridge for the static build. The publishable key is safe to
- * expose in browser code; no service-role or secret key belongs here. */
+/* Supabase Auth bridge for the static build. Uses GoTrue REST directly so the
+ * login does not depend on a third-party SDK bundle loading from a CDN. */
 (function () {
-  const client = window.__SUPABASE_CLIENT = window.supabase.createClient(
-    'https://jvyxnsokfpnepshyyzpg.supabase.co',
-    'sb_publishable_oTJWgjNgk8Oe9i8kaAUaDw_sloavHyq',
-    { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
-  );
+  const SUPABASE_URL = 'https://jvyxnsokfpnepshyyzpg.supabase.co';
+  const PUBLIC_KEY = 'sb_publishable_oTJWgjNgk8Oe9i8kaAUaDw_sloavHyq';
+  const STORAGE_KEY = 'wrk_supabase_auth_session';
   let currentUser = null;
   window.__SUPABASE_AUTH_USER = null;
   window.__AUTH_EMAIL = '';
@@ -15,22 +13,52 @@
     window.__AUTH_EMAIL = String(currentUser?.email || '').trim().toLowerCase();
     return session || null;
   };
+  const readSession = () => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) { return null; }
+  };
+  const writeSession = (session) => {
+    if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    else localStorage.removeItem(STORAGE_KEY);
+    return publish(session);
+  };
+  const refreshSession = async (session) => {
+    if (!session?.refresh_token) return null;
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token })
+    });
+    if (!response.ok) return null;
+    return writeSession(await response.json());
+  };
   window.supabaseAuthReady = async function () {
-    const { data } = await client.auth.getSession();
-    return publish(data?.session || null);
+    const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+    if (hash.get('access_token')) {
+      const expiresIn = Number(hash.get('expires_in') || 3600);
+      writeSession({ access_token: hash.get('access_token'), refresh_token: hash.get('refresh_token') || '', expires_in: expiresIn, expires_at: Math.floor(Date.now() / 1000) + expiresIn, token_type: hash.get('token_type') || 'bearer' });
+      history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+    }
+    let session = readSession();
+    if (session?.expires_at && session.expires_at * 1000 < Date.now() + 60000) session = await refreshSession(session);
+    if (!session?.access_token) return publish(null);
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: PUBLIC_KEY, Authorization: `Bearer ${session.access_token}` } });
+    if (!response.ok) return writeSession(null);
+    const user = await response.json();
+    return publish({ ...session, user });
   };
   window.supabaseSignInWithGoogle = async function () {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await client.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo, queryParams: { prompt: 'select_account' } }
-    });
-    if (error) throw error;
+    const url = new URL(`${SUPABASE_URL}/auth/v1/authorize`);
+    url.searchParams.set('provider', 'google');
+    url.searchParams.set('redirect_to', redirectTo);
+    url.searchParams.set('apikey', PUBLIC_KEY);
+    url.searchParams.set('prompt', 'select_account');
+    window.location.assign(url.toString());
   };
   window.supabaseSignOut = async function () {
-    await client.auth.signOut();
-    publish(null);
+    const session = readSession();
+    if (session?.access_token) await fetch(`${SUPABASE_URL}/auth/v1/logout`, { method: 'POST', headers: { apikey: PUBLIC_KEY, Authorization: `Bearer ${session.access_token}` } }).catch(() => {});
+    writeSession(null);
   };
-  client.auth.onAuthStateChange((_event, session) => publish(session));
   window.__SUPABASE_AUTH_READY = window.supabaseAuthReady();
+  window.__SUPABASE_CLIENT = { auth: { getSession: async () => ({ data: { session: readSession() } }) } };
 })();
