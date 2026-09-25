@@ -438,11 +438,35 @@
     const subscriptions = [];
     const attach = (selectedTerm, termRoot) => {
       if (stopped) return;
+      const attachTermFamily = (name, pathName) => {
+        const queryValues = termQueryValues(termRoot, selectedTerm, pathName);
+        const refs = queryValues.length
+          ? queryValues.map((value) => db.ref(`/${pathName}`).orderByChild('Term').equalTo(value))
+          : [db.ref(`/${pathName}`)];
+        const sourceRows = refs.map(() => ({}));
+        const sourceReady = refs.map(() => false);
+        let readyCount = 0;
+        refs.forEach((ref, index) => {
+          const handler = (snapshot) => {
+            if (stopped) return;
+            sourceRows[index] = snapshot.val() || {};
+            if (!sourceReady[index]) {
+              sourceReady[index] = true;
+              readyCount += 1;
+            }
+            state[name] = Object.assign({}, ...sourceRows);
+            if (readyCount === refs.length) readyNames.add(name);
+            emit();
+          };
+          subscriptions.push({ ref, handler });
+          ref.on('value', handler, (error) => {
+            console.error('FIREBASE_REALTIME_ERROR', name, error && error.code ? error.code : error);
+            if (!stopped && typeof onError === 'function') onError(error, name);
+          });
+        });
+      };
       const specs = [
-        ['students', db.ref('/students').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'students'))],
         ['subjects', db.ref('/subjects')],
-        ['assignments', db.ref('/assignments').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'assignments'))],
-        ['attendance', db.ref('/attendance').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'attendance'))],
         ['terms', db.ref('/terms')],
         ['teacherClasses', db.ref('/teacherClasses')]
       ];
@@ -452,6 +476,9 @@
         const filtersReady = ['students', 'subjects', 'assignments', 'teacherClasses'].every((name) => readyNames.has(name));
         if (!stopped && filtersReady) onChange(initial({ ...state }, selectedTerm, currentUser), { term: selectedTerm, initial: true });
       };
+      attachTermFamily('students', 'students');
+      attachTermFamily('assignments', 'assignments');
+      attachTermFamily('attendance', 'attendance');
       specs.forEach(([name, ref]) => {
         const handler = (snapshot) => {
           if (stopped) return;
@@ -625,6 +652,30 @@
         fail(error, name);
       });
     };
+    const attachTermFamily = (name, pathName) => {
+      const queryValues = termQueryValues(termRoot, selectedTerm, pathName);
+      const refs = queryValues.length
+        ? queryValues.map((value) => db.ref(`/${pathName}`).orderByChild('Term').equalTo(value))
+        : [db.ref(`/${pathName}`)];
+      const sourceRows = refs.map(() => ({}));
+      const sourceReady = refs.map(() => false);
+      let familyReady = false;
+      refs.forEach((ref, index) => {
+        const handler = (snapshot) => {
+          if (stopped) return;
+          sourceRows[index] = snapshot.val() || {};
+          if (!sourceReady[index]) sourceReady[index] = true;
+          state[name] = Object.assign({}, ...sourceRows);
+          if (!familyReady && sourceReady.every(Boolean)) {
+            familyReady = true;
+            readyCount += 1;
+          }
+          emit();
+        };
+        subscriptions.push({ ref, handler });
+        ref.on('value', handler, (error) => fail(error, name));
+      });
+    };
     readyTimer = setTimeout(() => {
       const error = new Error('หมดเวลารอข้อมูลตัดเกรดแบบเรียลไทม์');
       error.code = 'client/realtime-timeout';
@@ -635,9 +686,9 @@
       termRoot = { terms: snapshot.val() || {} };
       selectedTerm = activeTerm(termRoot, selectedTerm);
       filter.term = selectedTerm;
-      attach('students', db.ref('/students').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'students')));
-      attach('assignments', db.ref('/assignments').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'assignments')));
-      attach('scores', db.ref('/scores').orderByChild('Term').equalTo(termQueryValue(termRoot, selectedTerm, 'scores')));
+      attachTermFamily('students', 'students');
+      attachTermFamily('assignments', 'assignments');
+      attachTermFamily('scores', 'scores');
       attach('settings', db.ref('/settings'));
       attach('teacherClasses', db.ref('/teacherClasses'));
       attach('terms', db.ref('/terms'));
@@ -660,6 +711,27 @@
       return text(active && active.TermID) || wanted;
     }
     return wanted;
+  }
+  function termQueryValues(root, selected, pathName) {
+    // Historical migrations stored the visible term label in some families
+    // and the Terms.TermID timestamp in others. Read both representations
+    // and merge by Firebase key without changing the source data.
+    const wanted = canonicalTerm(selected, root);
+    const candidates = [];
+    const add = (value) => {
+      const normalized = text(value);
+      if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+    };
+    add(termQueryValue(root, selected, pathName));
+    add(wanted);
+    values('terms', root).forEach((record) => {
+      if (termLabel(record) === wanted) {
+        add(record.TermID);
+        add(record.TermKey);
+        add(record.CanonicalTermID);
+      }
+    });
+    return candidates;
   }
   function matchesTerm(value, selected, root) {
     const v = canonicalTerm(value, root); const wanted = canonicalTerm(selected, root);
@@ -1415,7 +1487,44 @@
 })();
 
 </script>
-</head>
+
+<script>
+/* Supabase score cutover client. Firebase remains the identity provider. */
+(function () {
+  const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
+  const originalRun = window.google?.script?.run;
+  if (!originalRun) return;
+  const scoreMethods = new Set(['loadScoresGrid', 'saveScoresBatch']);
+  const request = async (action, payload) => {
+    const user = window.firebase?.auth?.().currentUser;
+    if (!user) throw new Error('กรุณาเข้าสู่ระบบก่อนใช้งานคะแนน');
+    const token = await user.getIdToken();
+    const response = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` }, body:JSON.stringify({ action, ...payload }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) throw new Error(result.message || `Supabase ${response.status}`);
+    return result;
+  };
+  let success = null, failure = null;
+  const proxy = new Proxy({}, { get(_target, prop) {
+    if (prop === 'withSuccessHandler') return (fn) => { success = fn; return proxy; };
+    if (prop === 'withFailureHandler') return (fn) => { failure = fn; return proxy; };
+    if (scoreMethods.has(String(prop))) return (payload) => {
+      const onSuccess = success, onFailure = failure; success = failure = null;
+      request(String(prop) === 'loadScoresGrid' ? 'load' : 'save', payload || {}).then((value) => onSuccess && onSuccess(value)).catch((error) => onFailure && onFailure(error));
+      return proxy;
+    };
+    return (...args) => {
+      let runner = originalRun;
+      if (success) runner = runner.withSuccessHandler(success);
+      if (failure) runner = runner.withFailureHandler(failure);
+      success = failure = null;
+      return runner[prop](...args);
+    };
+  }});
+  window.google.script.run = proxy;
+})();
+
+</script></head>
 <body class="h-screen overflow-hidden text-slate-800">
 
     <div id="loading-overlay" class="fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center hidden">
