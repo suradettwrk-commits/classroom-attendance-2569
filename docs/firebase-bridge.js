@@ -837,7 +837,8 @@
     if (name === 'getCurrentUserProfile') {
       await ready();
       const id = text(args[0]);
-      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
+      const identity = window.__SUPABASE_AUTH_USER || auth.currentUser;
+      const email = String(identity?.email || '').trim().toLowerCase();
       let record = null;
       if (email === 'suradet.t@wrk.ac.th') {
         record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;

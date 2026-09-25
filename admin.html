@@ -1338,7 +1338,7 @@
         }
 
         queueStorageKey() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const localUser = (typeof CURRENT_USER !== 'undefined') ? CURRENT_USER : null;
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
@@ -1403,7 +1403,7 @@
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
             if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
@@ -2854,7 +2854,7 @@
 
         const fetchData = (retry = 0, options = {}) => {
             const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase());
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const authPending = staffRole && (!authUser || authUser.isAnonymous) && window.__AUTH_READY_STATE !== 'missing';
             if (authPending && !options.skipAuthWait) {
                 clearScoreView('กำลังยืนยันบัญชีเพื่อโหลดข้อมูลคะแนน...');

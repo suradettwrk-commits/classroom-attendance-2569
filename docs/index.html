@@ -888,7 +888,8 @@
     if (name === 'getCurrentUserProfile') {
       await ready();
       const id = text(args[0]);
-      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
+      const identity = window.__SUPABASE_AUTH_USER || auth.currentUser;
+      const email = String(identity?.email || '').trim().toLowerCase();
       let record = null;
       if (email === 'suradet.t@wrk.ac.th') {
         record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;
@@ -1488,7 +1489,7 @@
 
 </script>
 
-<script src="./supabase-auth-client.js?v=1790328526163"></script>
+<script src="./supabase-auth-client.js?v=1790328761766"></script>
 <script>
 /* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
 (function () {
@@ -3428,7 +3429,7 @@ var DATA_CONTROLLER = new DataController();
         }
 
         queueStorageKey() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const localUser = (typeof CURRENT_USER !== 'undefined') ? CURRENT_USER : null;
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
@@ -3493,7 +3494,7 @@ var DATA_CONTROLLER = new DataController();
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
             if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
@@ -4944,7 +4945,7 @@ var DATA_CONTROLLER = new DataController();
 
         const fetchData = (retry = 0, options = {}) => {
             const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase());
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
             const authPending = staffRole && (!authUser || authUser.isAnonymous) && window.__AUTH_READY_STATE !== 'missing';
             if (authPending && !options.skipAuthWait) {
                 clearScoreView('กำลังยืนยันบัญชีเพื่อโหลดข้อมูลคะแนน...');
