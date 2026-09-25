@@ -133,7 +133,9 @@
             const firebaseReady = !!(window.firebase && firebase.auth);
             if (bridgeReady && firebaseReady && authReady) {
                 if (!window.__authBootstrapPromise) {
-                    window.__authBootstrapPromise = window.supabaseAuthReady();
+                    // The auth bridge starts its bootstrap once while loading.
+                    // Reuse that promise so a PKCE callback is never exchanged twice.
+                    window.__authBootstrapPromise = window.__SUPABASE_AUTH_READY || window.supabaseAuthReady();
                 }
                 window.__authBootstrapPromise.then((session) => {
                     const user = session?.user || window.__SUPABASE_AUTH_USER || null;
