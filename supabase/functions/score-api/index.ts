@@ -5,7 +5,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("MIGRATION_SERVICE_ROLE_KEY")!;
 const ALLOWED_ORIGINS = new Set(["https://classroom-attendance-2569.web.app", "https://suradettwrk-commits.github.io", Deno.env.get("APP_ORIGIN") || ""].filter(Boolean));
 const FIREBASE_JWKS = createRemoteJWKSet(new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"));
-const ADMIN_EMAIL = "suradet.t@wrk.ac.th";
+const ADMIN_EMAILS = new Set(["suradet.t@wrk.ac.th", "suradett.wrk@eisth.org"]);
 const corsFor = (request: Request) => ({ "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(request.headers.get("origin") || "") ? (request.headers.get("origin") || "") : "https://classroom-attendance-2569.web.app", "Access-Control-Allow-Headers": "authorization, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Vary": "Origin" });
 const json = (body: unknown, status = 200, request?: Request) => new Response(JSON.stringify(body), { status, headers: { ...corsFor(request || new Request("https://localhost")), "Content-Type": "application/json" } });
 const enc = (v: unknown) => encodeURIComponent(String(v ?? ""));
@@ -16,17 +16,22 @@ const api = async (path: string, init: RequestInit = {}) => {
   if (!response.ok) throw new Error(`${response.status}: ${body}`);
   return body ? JSON.parse(body) : [];
 };
-const rows = async (table: string, select = "*") => api(`${table}?select=${select}`);
+const rows = async (table: string, select = "*") => api(table.includes("?") ? table : `${table}?select=${select}`);
 const activeTermRow = (terms: any[]) => terms.find((t) => text(t.status).toLowerCase() === "active") || terms[0];
 const uiStudent = (s: any, term: any) => ({ id:s.student_id, studentId:s.student_id, no:s.student_no, prefix:s.prefix||"", first:s.first_name||"", last:s.last_name||"", firstName:s.first_name||"", lastName:s.last_name||"", name:[s.prefix,s.first_name,s.last_name].filter(Boolean).join(" "), level:s.level, room:s.room, status:s.status, term:term?.display_label||"", termId:s.term_id });
 const uiSubject = (s: any, term: any) => ({ code:s.subject_code, name:s.subject_name||"", term:term?.display_label||"", termId:s.term_id, status:s.status||"", teacher:s.teacher||"" });
 const uiAssignment = (a: any, term: any) => ({ id:a.assignment_id, assignmentId:a.assignment_id, title:a.title||"", maxScore:Number(a.max_score||0), subjectCode:a.subject_code, type:a.assignment_type||"", dueDate:a.due_date, level:a.level, room:a.room, term:term?.display_label||"", termId:a.term_id });
 const uiClass = (c: any, term: any) => ({ id:c.teacher_class_id, teacherClassId:c.teacher_class_id, termId:c.term_id, teacherId:c.teacher_id, subjectCode:c.subject_code, level:c.level, room:c.room, status:c.status||"Active", term:term?.display_label||"" });
 async function bootstrapData(auth: any) {
-  const [terms, subjects, students, assignments, classes, users] = await Promise.all([
-    rows("terms"), rows("subjects"), rows("students"), rows("assignments"), rows("teacher_classes"), auth.admin ? rows("app_users") : Promise.resolve([])
+  const terms = await rows("terms", "term_id,term_no,academic_year,status,display_label,legacy_term_key");
+  const term = activeTermRow(terms), termId = term?.term_id, filter = termId ? `&term_id=eq.${enc(termId)}` : "";
+  const [subjects, students, assignments, classes, users] = await Promise.all([
+    rows(`subjects?select=subject_code,subject_name,term_id,status,teacher${filter}`),
+    rows(`students?select=student_id,student_no,prefix,first_name,last_name,level,room,status,term_id${filter}`),
+    rows(`assignments?select=assignment_id,title,assignment_type,max_score,due_date,subject_code,level,room,status,term_id${filter}`),
+    rows(`teacher_classes?select=teacher_class_id,term_id,teacher_id,subject_code,level,room,status${filter}`),
+    auth.admin ? rows("app_users", "user_id,username,email,role,status") : Promise.resolve([])
   ]);
-  const term = activeTermRow(terms), termId = term?.term_id;
   const activeSubjects = subjects.filter((s:any) => s.term_id === termId && text(s.status).toLowerCase() !== "inactive");
   const activeStudents = students.filter((s:any) => s.term_id === termId);
   const activeAssignments = assignments.filter((a:any) => a.term_id === termId);
@@ -40,11 +45,18 @@ async function bootstrapData(auth: any) {
   return { success:true, term:data.meta.term, levels:data.levels, rooms:data.rooms, subjects:data.subjects, combos:data.combos, teacherClasses:data.teacherClasses, studentsLite:data.students, data };
 }
 async function dashboardData(auth: any, requestedTerm: any) {
-  const [terms, students, assignments, classes, attendance] = await Promise.all([rows("terms"),rows("students"),rows("assignments"),rows("teacher_classes"),rows("attendance")]);
-  const term=activeTermRow(terms), termId=term?.term_id, scopedClasses=classes.filter((c:any)=>c.term_id===termId && (auth.admin || text(c.teacher_id)===text(auth.teacherId))), allowed=new Set(scopedClasses.map((c:any)=>`${c.level}|${c.room}`));
+  const terms = await rows("terms", "term_id,term_no,academic_year,status,display_label,legacy_term_key");
+  const term=activeTermRow(terms), termId=term?.term_id;
+  const [students, assignments, classes, attendance] = await Promise.all([
+    rows(`students?term_id=eq.${enc(termId)}&select=student_id,level,room,term_id,status`),
+    rows(`assignments?term_id=eq.${enc(termId)}&select=assignment_id,subject_code,level,room,term_id,status`),
+    rows(`teacher_classes?term_id=eq.${enc(termId)}&select=teacher_class_id,term_id,teacher_id,subject_code,level,room,status`),
+    termId ? api(`attendance?term_id=eq.${enc(termId)}&select=status`) : Promise.resolve([])
+  ]);
+  const scopedClasses=classes.filter((c:any)=>c.term_id===termId && (auth.admin || text(c.teacher_id)===text(auth.teacherId))), allowed=new Set(scopedClasses.map((c:any)=>`${c.level}|${c.room}`));
   const ss=auth.admin?students.filter((s:any)=>s.term_id===termId):students.filter((s:any)=>s.term_id===termId&&allowed.has(`${s.level}|${s.room}`));
   const aa=auth.admin?assignments.filter((a:any)=>a.term_id===termId):assignments.filter((a:any)=>a.term_id===termId&&scopedClasses.some((c:any)=>c.subject_code===a.subject_code&&c.level===a.level&&c.room===a.room));
-  const ar=attendance.filter((a:any)=>a.term_id===termId); const status=(v:any)=>text(v).toLowerCase(); const day=ar.filter((a:any)=>!requestedTerm || true); const count=(names:string[])=>day.filter((a:any)=>names.includes(status(a.status))).length;
+  const ar=attendance; const status=(v:any)=>text(v).toLowerCase(); const day=ar; const count=(names:string[])=>day.filter((a:any)=>names.includes(status(a.status))).length;
   return {success:true,totalStudents:ss.length,presentToday:count(["present","มา","มาเรียน"]),totalAssignments:aa.length,riskStudents:0,stats:{present:count(["present","มา","มาเรียน"]),late:count(["late","สาย"]),leave:count(["leave","ลา"]),absent:count(["absent","ขาด"])},riskList:[],classSummary:[],termSummary:{present:0,late:0,leave:0,absent:0}};
 }
 const termIdFor = async (value: unknown) => {
@@ -82,7 +94,7 @@ async function authenticate(request: Request) {
     email = text(verified.payload.email).toLowerCase();
   }
   if (!email) throw new Error("ไม่พบอีเมลใน Login Token");
-  if (email === ADMIN_EMAIL) return { admin: true, teacherId: "admin" };
+  if (ADMIN_EMAILS.has(email)) return { admin: true, teacherId: "admin" };
   const profiles = await api(`auth_profiles?select=legacy_user_id,role,status&email=eq.${enc(email)}&limit=10`);
   const profile = profiles.find((p: any) => text(p.status).toLowerCase() === "active" && text(p.role).toLowerCase() === "teacher");
   if (!profile?.legacy_user_id) throw new Error("บัญชีครูยังไม่ได้รับอนุมัติ");
@@ -109,14 +121,18 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsFor(request) });
   try {
     const auth = await authenticate(request), body = await request.json(), action = text(body.action);
-    if (action === "bootstrap") return json(await bootstrapData(auth));
-    if (action === "dashboard") return json(await dashboardData(auth, body.term));
+    if (action === "bootstrap") return json(await bootstrapData(auth), 200, request);
+    if (action === "dashboard") return json(await dashboardData(auth, body.term), 200, request);
     if (action === "profile") {
-      const profiles = await api(`app_users?email=eq.${enc(text(body.email).toLowerCase())}&select=user_id,username,email,role,status&limit=1`);
-      return json({success:!!profiles[0], data:profiles[0] ? {id:profiles[0].user_id,username:profiles[0].username,email:profiles[0].email,role:profiles[0].role,status:profiles[0].status} : null});
+      const requestedEmail = text(body.email).toLowerCase();
+      if (auth.admin && ADMIN_EMAILS.has(requestedEmail)) {
+        return json({success:true, data:{id:"admin",username:requestedEmail.split("@")[0],email:requestedEmail,role:"admin",status:"Active"}}, 200, request);
+      }
+      const profiles = await api(`app_users?email=eq.${enc(requestedEmail)}&select=user_id,username,email,role,status&limit=1`);
+      return json({success:!!profiles[0], data:profiles[0] ? {id:profiles[0].user_id,username:profiles[0].username,email:profiles[0].email,role:profiles[0].role,status:profiles[0].status} : null}, 200, request);
     }
     const ctx = await context(body, auth);
-    if (action === "load") return json(output(ctx));
+    if (action === "load") return json(output(ctx), 200, request);
     if (action !== "save") throw new Error("คำสั่งไม่ถูกต้อง");
     const students = new Set(ctx.students.map((s:any)=>s.student_id)), assignments = new Set(ctx.assignments.map((a:any)=>a.assignment_id));
     const existing = new Map(ctx.scores.map((s:any)=>[`${s.assignment_id}_${s.student_id}`,s]));
@@ -129,6 +145,6 @@ Deno.serve(async (request) => {
       return {score_id:old?.score_id||`SCORE_${ctx.termId}_${assignmentId}_${studentId}`,term_id:ctx.termId,assignment_id:assignmentId,student_id:studentId,subject_code:ctx.subjectCode,score:value,is_submitted:value!==null&&(r.isSubmitted===undefined||Boolean(r.isSubmitted)),updated_at:new Date().toISOString()};
     });
     if (rows.length) await api("scores?on_conflict=term_id,score_id", { method:"POST", headers:{Prefer:"resolution=merge-duplicates,return=minimal"}, body:JSON.stringify(rows) });
-    return json({ ...output(await context(body, auth)), saved:rows.length, message:"บันทึกคะแนนเข้า Supabase สำเร็จ" });
-  } catch (error) { return json({success:false,message:error instanceof Error?error.message:String(error)},400); }
+    return json({ ...output(await context(body, auth)), saved:rows.length, message:"บันทึกคะแนนเข้า Supabase สำเร็จ" }, 200, request);
+  } catch (error) { return json({success:false,message:error instanceof Error?error.message:String(error)},400,request); }
 });
