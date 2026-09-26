@@ -3700,6 +3700,8 @@
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = html; 
+            document.documentElement.offsetHeight;
+            window.focus();
             window.print();
         };
 
@@ -4777,6 +4779,8 @@
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML;
+            document.documentElement.offsetHeight;
+            window.focus();
             window.print();
         }
         return false;
@@ -7349,7 +7353,10 @@
         let style = getEl('dynamic-print-style');
         if (!style) { style = document.createElement('style'); style.id = 'dynamic-print-style'; document.head.appendChild(style); }
         style.innerHTML = '@media print { @page { size: portrait; margin: 10mm; } }';
+        document.documentElement.offsetHeight;
+        window.focus();
         window.print();
+        return false;
     }
     ['grading-term','grading-subject','grading-level','grading-room','grading-w-pre','grading-w-mid','grading-w-post','grading-w-final','grading-goal'].forEach(id => { const el = getEl(id); if (el) el.addEventListener('change', () => { if ((id.startsWith('grading-w-') || id === 'grading-goal') && window.NATIVE_GRADING.data) { window.NATIVE_GRADING.settingsDirty = true; window.NATIVE_GRADING.revision = (window.NATIVE_GRADING.revision || 0) + 1; renderNativeGradingTable(window.NATIVE_GRADING.data); scheduleNativeGradingAutosave(); } else if (['grading-term','grading-subject','grading-level','grading-room'].includes(id)) { if (gradingHasPendingEdits()) { const last = window.NATIVE_GRADING.lastFilter || {}; const map = { 'grading-term':'term', 'grading-subject':'subject', 'grading-level':'level', 'grading-room':'room' }; if (last[map[id]]) el.value = last[map[id]]; return gradingSetStatus('ยังมีคะแนนตัดเกรดค้างบันทึก กรุณารอให้บันทึกเสร็จก่อนเปลี่ยนห้องหรือวิชา', 'error'); } loadNativeGradingData(); } }); });
     window.addEventListener('beforeunload', e => { if (gradingHasPendingEdits()) { e.preventDefault(); e.returnValue = ''; } });
