@@ -1873,7 +1873,7 @@ window.supabaseConfig = {
     normalizeContext: repositoryContext,
     getAllowedScopes: (context = {}) => {
       const normalized = repositoryContext(context);
-      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 }).then(result => {
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 30000, retries: 0 }).then(result => {
         const payload = result && result.data ? result.data : {};
         return {
           success: !!(result && result.success),
@@ -1890,12 +1890,12 @@ window.supabaseConfig = {
     },
     getDashboard: (context = {}) => {
       const normalized = repositoryContext(context);
-      return callReadWithRecovery('getDashboardStats', [normalized.term], { timeoutMs: 12000, retries: 0 });
+      return callReadWithRecovery('getDashboardStats', [normalized.term], { timeoutMs: 30000, retries: 0 });
     },
     getStudents: (context = {}) => repositoryRead('getStudentsByFilter', repositoryContext(context)),
     getAssignments: (context = {}) => {
       const normalized = repositoryContext(context);
-      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 })
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 30000, retries: 0 })
         .then(result => {
           const rows = result && result.data && Array.isArray(result.data.assignments) ? result.data.assignments : [];
           return { ...result, data: rows.filter(row =>
