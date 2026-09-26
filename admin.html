@@ -2337,6 +2337,7 @@
         
         let subjects = data.subjects || (snapshotData && snapshotData.subjects ? snapshotData.subjects : null);
         if (subjects && subjects.length > 0) {
+            subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
             const opts = subjects.map(s => `<option value="${s.code}">${getSubjectDisplayLabel(s)}</option>`).join('');
             ['att-subject', 'sc-subject', 'asn-subject'].forEach(id => { 
@@ -6059,19 +6060,35 @@
     // [BUG-3 FIX] getSubjectDisplayLabel — แสดง "รหัสวิชา ชื่อวิชา"
     function getSubjectDisplayLabel(s) {
         if (!s) return '';
-        var code = String(s.code || s.subjectCode || '').trim();
-        var name = String(s.name || s.subjectName || '').trim();
+        var normalized = normalizeSubjectRecord(s);
+        var code = normalized.code;
+        var name = normalized.name;
         if (code && name) return code + ' ' + name;
         if (code) return code;
         return name;
     }
     window.getSubjectDisplayLabel = getSubjectDisplayLabel;
 
+    function normalizeSubjectRecord(subject) {
+        const raw = subject && subject.legacy_data && typeof subject.legacy_data === 'object'
+            ? { ...subject.legacy_data, ...subject }
+            : (subject || {});
+        const pick = (...keys) => keys.map(key => raw[key]).find(value => value !== undefined && value !== null && String(value).trim() !== '');
+        return {
+            ...raw,
+            code: String(pick('code', 'subjectCode', 'SubjectCode', 'subject_code') || '').trim(),
+            name: String(pick('name', 'subjectName', 'SubjectName', 'subject_name') || '').trim(),
+            term: pick('term', 'Term', 'termId', 'TermID', 'term_id') || ''
+        };
+    }
+    window.normalizeSubjectRecord = normalizeSubjectRecord;
+
     function applyAdminSettingsBootstrap(data, forceRender) {
         if (!data || !data.success) return false;
         const term = normalizeTermForUI(data.term || window.CURRENT_SERVER_TERM);
         // [SUBJECTS-FIX] รับ subjects จากทั้งสองที่: data.subjects (primary) หรือ data.dropdowns.subjects (fallback)
-        const _subjectsRaw = data.subjects || (data.dropdowns && data.dropdowns.subjects ? data.dropdowns.subjects : []);
+        const _subjectsRaw = (data.subjects || (data.dropdowns && data.dropdowns.subjects ? data.dropdowns.subjects : []))
+            .map(normalizeSubjectRecord).filter(subject => subject.code);
         console.log('SUBJECTS_BOOTSTRAP_RAW count=' + _subjectsRaw.length + ' term=' + term);
         const counts = data.meta && data.meta.counts ? data.meta.counts : {};
         const applyKey = [
@@ -7190,9 +7207,10 @@
         const subjectSource = rows(window.SUBJECTS_CACHE).length
             ? rows(window.SUBJECTS_CACHE)
             : (rows(boot.subjects).length ? rows(boot.subjects) : rows(liveDb.subjects));
-        const subjects = subjectSource.filter(s => role === 'admin' || scopedSubjectCodes.has(String(s.code || s.subjectCode || '')));
+        const normalizedSubjects = subjectSource.map(normalizeSubjectRecord).filter(s => s.code);
+        const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
-        gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code || s.subjectCode, label: `${s.code || s.subjectCode} ${s.name || s.subjectName || ''}` })), selectedSubject);
+        gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
         const studentSources = []
             .concat(rows(liveDb.students))
