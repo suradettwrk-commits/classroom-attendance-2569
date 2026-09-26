@@ -90,6 +90,9 @@ if (new URLSearchParams(window.location.search || '').get('localRole')) {
 </script>`;
 html = html.replace('</body>', `${localLoginOverride}</body>`);
 fs.writeFileSync(path.join(outDir, 'index.html'), html, 'utf8');
+if (fs.existsSync(path.join(root, 'docs', 'tailwind.css'))) {
+  fs.copyFileSync(path.join(root, 'docs', 'tailwind.css'), path.join(outDir, 'tailwind.css'));
+}
 fs.copyFileSync(path.join(root, 'local-test-firebase.js'), path.join(outDir, 'local-test-firebase.js'));
 fs.copyFileSync(path.join(root, 'firebase-bridge.js'), path.join(outDir, 'firebase-bridge.js'));
 console.log(`Built local test app at ${outDir}`);

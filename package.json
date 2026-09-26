@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "build:css": "tailwindcss -i styles/tailwind.css -o docs/tailwind.css --minify",
+    "build:pages": "npm run build:css && node build-github-pages.js",
     "test:term-contract": "node scripts/verify-term-contract.js",
     "test:repository-contract": "node scripts/verify-repository-contract.js",
     "test:release-contract": "node scripts/verify-release-contract.js",
@@ -8,5 +10,10 @@
   },
   "dependencies": {
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17"
   }
 }

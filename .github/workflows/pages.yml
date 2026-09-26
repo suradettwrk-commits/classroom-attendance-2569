@@ -23,8 +23,14 @@ jobs:
     steps:
       - name: Checkout exact GitHub commit
         uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install build dependencies
+        run: npm ci
       - name: Build static Supabase client
-        run: node build-github-pages.js
+        run: npm run build:pages
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload GitHub Pages artifact

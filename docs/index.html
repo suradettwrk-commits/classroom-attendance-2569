@@ -6,26 +6,11 @@
     <base target="_self">
     <title>ระบบจัดการชั้นเรียน - ครูสุรเดช ธรรมประโชติ</title>
     
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="tailwind.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Sarabun', 'sans-serif'] },
-                    colors: {
-                        'school-primary': '#1e3a8a',
-                        'school-secondary': '#fbbf24',
-                        'bg-soft': '#f8fafc'
-                    }
-                }
-            }
-        }
-    </script>
 
     <style>
         body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; }
@@ -122,9 +107,23 @@ window.supabaseConfig = {
   }
   function termFilterCandidates(termRows, requestedTerm) {
     const active = (termRows || []).find(row => text(row && (row.status || row.Status)).toLowerCase() === 'active') || (termRows || [])[0];
-    const requested = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
-    if (!requested) return [];
-    const candidates = new Set([requested]);
+    const requestedRaw = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
+    if (!requestedRaw) return [];
+    // The display label is a UI value, not a database key. Once the term row
+    // resolves it, query activity tables by canonical term_id only. This
+    // avoids a second full/RLS scan for an unindexed legacy label.
+    const requestedRow = (termRows || []).find(row => {
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      const termId = text(row && (row.term_id || row.termId || row.TermID));
+      const labels = [
+        row && (row.display_label || row.term || row.Term),
+        row && `${row.term_no || row.termNo || row.TermNo || ''}/${row.academic_year || row.academicYear || row.AcademicYear || ''}`,
+        legacy.display_label || legacy.term || legacy.Term,
+        `${legacy.term_no || legacy.termNo || legacy.TermNo || ''}/${legacy.academic_year || legacy.academicYear || legacy.AcademicYear || ''}`
+      ].map(text).filter(Boolean);
+      return (termId && sameTerm(termId, requestedRaw)) || labels.some(label => sameTerm(label, requestedRaw));
+    });
+    const candidates = new Set([text(requestedRow && (requestedRow.term_id || requestedRow.termId || requestedRow.TermID)) || requestedRaw]);
     (termRows || []).forEach(row => {
       const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
       const termId = text(row && (row.term_id || row.termId || row.TermID));
@@ -134,13 +133,21 @@ window.supabaseConfig = {
         legacy.display_label || legacy.term || legacy.Term,
         `${legacy.term_no || legacy.termNo || legacy.TermNo || ''}/${legacy.academic_year || legacy.academicYear || legacy.AcademicYear || ''}`
       ].map(text).filter(Boolean);
-      if (termId && labels.some(label => sameTerm(label, requested))) candidates.add(termId);
+      if (termId && labels.some(label => sameTerm(label, requestedRaw)) && !requestedRow) candidates.add(termId);
     });
     return [...candidates];
   }
   async function readAllRows(name, termCandidates) {
     const rows = [];
     const pageSize = 500;
+    // Activity tables can carry a large legacy_data JSON payload. The UI only
+    // needs the canonical columns below; selecting the whole row makes a cold
+    // PostgREST/RLS read much more likely to hit the server statement budget.
+    const projections = {
+      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,due_date,level,room,status,legacy_data',
+      attendance: 'record_id,term_id,student_id,subject_code,attendance_date,status,note,recorder,legacy_data',
+      scores: 'score_id,term_id,assignment_id,student_id,subject_code,score,is_submitted,legacy_data'
+    };
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
     // compatibility layer is always consumed for one active term at a time,
@@ -156,7 +163,7 @@ window.supabaseConfig = {
     // the compatibility layer read-only and allows both aliases to coexist.
     for (const termValue of terms) {
       for (let offset = 0; ; offset += pageSize) {
-        let query = client.from(tableName(name)).select('*');
+        let query = client.from(tableName(name)).select(projections[name] || '*');
         if (termValue) query = query.eq('term_id', termValue);
         const { data, error } = await query.range(offset, offset + pageSize - 1);
         if (error) return { data: null, error };
@@ -2559,25 +2566,8 @@ var DATA_CONTROLLER = new DataController();
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <!-- 3. Import SweetAlert2 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<!-- 4. Import Tailwind CSS & Configure Custom Colors -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-    tailwind.config = {
-        theme: {
-            extend: {
-                fontFamily: {
-                    sans: ['Prompt', 'sans-serif'], // Changed to Prompt
-                },
-                colors: {
-                    'school-primary': '#6366f1', // Modern indigo
-                    'school-hover': '#4f46e5',   // Vivid indigo
-                    'school-soft': '#f8faff',    // Light background
-                    'text-active': '#2e343a'     // Dark text for active state
-                }
-            }
-        }
-    }
-</script>
+<!-- 4. Tailwind is compiled into docs/tailwind.css during the release build. -->
+<link rel="stylesheet" href="tailwind.css">
 
 <style>
     /* ==================== GLOBAL STYLES ==================== */

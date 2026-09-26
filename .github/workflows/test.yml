@@ -17,6 +17,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Install build dependencies
+        run: npm ci
       - name: Check JavaScript syntax
         run: |
           node --check build-github-pages.js
@@ -24,6 +26,6 @@ jobs:
           node --check supabase-auth.js
           node --check supabase-compat.js
       - name: Build GitHub Pages artifact
-        run: node build-github-pages.js
+        run: npm run build:pages
       - name: Verify generated artifact
         run: test -s docs/index.html && ! grep -q 'imported_students' docs/index.html
