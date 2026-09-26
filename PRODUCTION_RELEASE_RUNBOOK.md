@@ -10,8 +10,9 @@
 4. รัน `npm run test:repository-contract`
 5. รัน `npm run test:release-contract`
 6. รัน `npm run test:ui-contract`
-7. รัน `git diff --check`
-8. ใช้ Local Test ตรวจ Attendance วันที่ไม่มีข้อมูล: roster ต้องครบ, สถานะทั้ง 4 สีต้องเปลี่ยนได้, กดสถานะเดิมซ้ำต้องเคลียร์ และ reload แล้วต้องว่าง
+7. รัน `BACKUP_MANIFEST=/path/to/_BACKUP_LIVE_MANIFEST_*.sha256 npm run test:backup-manifest`
+8. รัน `git diff --check`
+9. ใช้ Local Test ตรวจ Attendance วันที่ไม่มีข้อมูล: roster ต้องครบ, สถานะทั้ง 4 สีต้องเปลี่ยนได้, กดสถานะเดิมซ้ำต้องเคลียร์ และ reload แล้วต้องว่าง
 
 ## Supabase migration
 
@@ -38,3 +39,5 @@
 ## Recovery
 
 ก่อน migration/release ให้เก็บ backup พร้อม timestamp และ commit SHA เดียวกัน หาก smoke test ล้มเหลวให้หยุดการ release, เก็บ console error + URL release + term/date/filter ที่ใช้, แล้ว revert application release หรือ restore database ตามสาเหตุ ห้ามลบข้อมูลเพื่อแก้ปัญหาเฉพาะหน้า
+
+Recovery rehearsal แบบไม่แตะ production: ตรวจ checksum ด้วย `test:backup-manifest`, ตรวจ term/data contract จาก backup จริง และสร้าง Local Test ด้วย `build-local-test.js` จาก backup เดิม การ restore database จริงต้องใช้ staging project หรือ snapshot ที่แยกจาก production และต้องมีผู้รับผิดชอบอนุมัติก่อนเขียนข้อมูล

@@ -6,6 +6,7 @@
     "test:repository-contract": "node scripts/verify-repository-contract.js",
     "test:release-contract": "node scripts/verify-release-contract.js",
     "test:ui-contract": "node scripts/verify-ui-contract.js",
+    "test:backup-manifest": "node scripts/verify-backup-manifest.js",
     "test:syntax": "node --check firebase-bridge.js && node --check supabase-compat.js && node --check supabase-auth.js"
   },
   "dependencies": {
