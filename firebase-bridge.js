@@ -1,36 +1,40 @@
-/* Firebase compatibility bridge for the static GitHub Pages build. */
+/* Supabase data/auth bridge for the static GitHub Pages build.
+ * The firebase-shaped API below is only a legacy application interface;
+ * supabase-compat.js supplies it and no Firebase SDK or Firebase data source
+ * is initialized in the production build.
+ */
 (function () {
   const app = firebase.initializeApp(window.firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.database();
-  // Keep Google Auth across reloads so Admin Rules see the same identity
+  // Keep Google Auth across reloads so Supabase RLS sees the same identity
   // that the UI session represents.
   const persistenceReady = Promise.race([
     auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
-      console.warn('Firebase Auth persistence unavailable', error && error.code ? error.code : error);
+      console.warn('Supabase Auth persistence unavailable', error && error.code ? error.code : error);
     }),
     new Promise((resolve) => setTimeout(resolve, 2500))
   ]);
   let snapshotPromise;
   let authReadyPromise;
   let termsPromise;
-  // Do not let a stalled Firebase connection block the application forever.
+  // Do not let a stalled Supabase connection block the application forever.
   // These are client-side circuit breakers only; they never delete or alter
   // records. A failed read is surfaced to the UI so the teacher can retry.
   const READ_CALL_TIMEOUT_MS = 15000;
   const READ_CALL_RETRIES = 1;
   // Google Auth persistence can be slow on a cold browser/profile. Do not
-  // fall through to anonymous Firebase before the saved teacher session has
+  // fall through to anonymous access before the saved teacher session has
   // had a real chance to restore.
   const AUTH_RESTORE_TIMEOUT_MS = 20000;
   const AUTH_SIGN_IN_TIMEOUT_MS = 12000;
   const SCORE_REALTIME_BOOT_TIMEOUT_MS = 18000;
   // Writes must fail back to the durable local queue instead of leaving the
-  // UI in a permanent "saving" state when Firebase never completes a request.
+  // UI in a permanent "saving" state when Supabase never completes a request.
   const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
 
   function readTerms() {
-    // All realtime and one-shot reads must wait for Firebase Auth restoration.
+    // All realtime and one-shot reads must wait for Supabase Auth restoration.
     // Starting a listener before auth is ready produces a denied/empty first
     // snapshot and leaves the UI waiting even though the account is valid.
     if (!termsPromise) termsPromise = ready().then(() => db.ref('/terms').once('value')).catch((error) => {
@@ -42,7 +46,7 @@
   }
 
   function ready() {
-    // Firebase can briefly expose currentUser=null while LOCAL persistence is
+    // Supabase can briefly expose currentUser=null while LOCAL persistence is
     // still restoring Google Auth. Waiting for persistence prevents admin calls
     // from falling through to Anonymous and receiving an empty/denied snapshot.
     return persistenceReady.then(() => {
@@ -53,7 +57,7 @@
           if (unsubscribe) unsubscribe();
           resolve(user || null);
         };
-        // Firebase emits an initial null while LOCAL persistence is being
+        // Supabase emits an initial null while LOCAL persistence is being
         // restored. Do not treat that transient event as a real logout.
         const timeout = setTimeout(() => finish(auth.currentUser || null), AUTH_RESTORE_TIMEOUT_MS);
         unsubscribe = auth.onAuthStateChanged((user) => {
@@ -67,11 +71,22 @@
         let timer;
         const timeout = new Promise((_, reject) => {
           timer = setTimeout(() => {
-            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Firebase');
+            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Supabase');
             error.code = 'client/auth-timeout';
             reject(error);
           }, AUTH_SIGN_IN_TIMEOUT_MS);
         });
+        if (window.__SUPABASE_MODE__) {
+          return Promise.race([
+            window.__SUPABASE_CLIENT__?.auth?.getSession().then((result) => {
+              const user = result?.data?.session?.user || null;
+              if (!user) throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
+              auth.currentUser = user;
+              return user;
+            }),
+            timeout
+          ]).finally(() => clearTimeout(timer));
+        }
         return Promise.race([auth.signInAnonymously().then((result) => result.user), timeout]).finally(() => clearTimeout(timer));
       });
     });
@@ -722,17 +737,23 @@
   }
   async function teacherOrAdmin(payload) {
     await ready();
-    const firebaseUser = auth.currentUser;
-    const firebaseEmail = String(firebaseUser && firebaseUser.email || '').toLowerCase();
-    if (firebaseEmail === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin' };
-    if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
+    const identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser;
+    const email = String(identityUser && identityUser.email || '').trim().toLowerCase();
+    if (email === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin', email };
+    if (!identityUser || identityUser.isAnonymous || !identityUser.id && !identityUser.uid || !email) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
-    const profile = (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
+    // Supabase app_users is the single source of staff identity. Do not use
+    // the retired Firebase authProfiles/authEmailIndex nodes for authorization.
+    const usersRoot = (await db.ref('/users').once('value')).val() || {};
+    const profile = Object.values(usersRoot).find((row) =>
+      text(row.Email || row.email).toLowerCase() === email ||
+      text(row.AuthUID || row.auth_uid || row.uid).toLowerCase() === text(identityUser.id || identityUser.uid).toLowerCase()
+    ) || {};
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
-    return { admin: false, teacherId: text(profile.UserID || profile.id), firebaseUid: firebaseUser.uid };
+    return { admin: false, teacherId: text(profile.UserID || profile.user_id || profile.id), supabaseUserId: identityUser.id || identityUser.uid, email };
   }
   async function teacherAssignmentOrAdmin(payload) {
     const authz = await teacherOrAdmin(payload);
