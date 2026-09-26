@@ -4648,6 +4648,10 @@ var DATA_CONTROLLER = new DataController();
         if (!rows(subjects).length && Array.isArray(window.SUBJECTS_CACHE)) {
             subjects = window.SUBJECTS_CACHE;
         }
+        if (!rows(subjects).length) {
+            const allowedCodes = new Set(window.CLASS_COMBOS.map(x => String(x.subject || '').trim()).filter(Boolean));
+            subjects = getSubjectCatalogFallback().filter(subject => currentRole !== 'teacher' || allowedCodes.has(subject.code));
+        }
         if (subjects && subjects.length > 0) {
             subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
@@ -8415,6 +8419,21 @@ var DATA_CONTROLLER = new DataController();
     }
     window.normalizeSubjectRecord = normalizeSubjectRecord;
 
+    function getSubjectCatalogFallback() {
+        // Last-resort read-only catalog from the verified latest backup. It is
+        // used only when the live subject read is temporarily empty; teacher
+        // views still filter it by their configured class permissions.
+        return [
+            { code: 'I20201', name: '(IS) การศึกษาค้นคว้าและสร้างองค์ความรู้' },
+            { code: 'ส21233', name: 'ต้านทุจริตศึกษา' },
+            { code: 'ส22101', name: 'สังคมศึกษาฯ (พระพุทธ-หน้าที่)' },
+            { code: 'ส22102', name: 'ประวัติศาสตร์' },
+            { code: 'ส22235', name: 'ต้านทุจริตศึกษา' },
+            { code: 'ส30101', name: 'ศาสนาสากล' }
+        ];
+    }
+    window.getSubjectCatalogFallback = getSubjectCatalogFallback;
+
     function applyAdminSettingsBootstrap(data, forceRender) {
         if (!data || !data.success) return false;
         const term = normalizeTermForUI(data.term || window.CURRENT_SERVER_TERM);
@@ -9563,6 +9582,7 @@ var DATA_CONTROLLER = new DataController();
                     .map(option => ({ code: option.value, name: option.textContent.replace(option.value, '').trim(), term: selectedTerm }));
             }
         }
+        if (!normalizedSubjects.length) normalizedSubjects = getSubjectCatalogFallback();
         const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
