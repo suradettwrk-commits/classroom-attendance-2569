@@ -7367,6 +7367,7 @@
         if (termSelect) delete termSelect.dataset.syncTerm;
         const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : {};
         const role = String(CURRENT_USER?.role || '').toLowerCase();
+        const isAdmin = role === 'admin' || String(CURRENT_USER?.email || CURRENT_USER?.Email || '').trim().toLowerCase() === 'suradet.t@wrk.ac.th';
         const teacherId = String(CURRENT_USER?.id || '');
         // Prefer a populated bootstrap scope, but do not let an empty/stale
         // bootstrap array hide the realtime class permissions.
@@ -7402,7 +7403,7 @@
         };
         const termClasses = allClasses.filter(termMatchesClass);
         const usableClasses = termClasses.length ? termClasses : allClasses;
-        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
+        const scopedClasses = (isAdmin ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
         const classSubject = c => classValue(c, ['subjectCode', 'SubjectCode', 'subject', 'subject_code']);
         const classLevel = c => classValue(c, ['level', 'Level', 'classLevel', 'class_level']);
         const classRoom = c => classValue(c, ['room', 'Room', 'classRoom', 'class_room']);
@@ -7432,7 +7433,7 @@
             }
         }
         if (!normalizedSubjects.length) normalizedSubjects = getSubjectCatalogFallback();
-        const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
+        const subjects = normalizedSubjects.filter(s => isAdmin || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
@@ -7451,7 +7452,7 @@
         // class permission mapping and makes every subject look identical.
         // Teachers remain restricted to their own configured classes.
         const adminSubjectClasses = usableClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
-        const subjectClasses = role === 'admin'
+        const subjectClasses = isAdmin
             ? (adminSubjectClasses.length ? adminSubjectClasses : (adminStudentClasses.length ? adminStudentClasses : usableClasses))
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
