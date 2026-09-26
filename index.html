@@ -98,9 +98,15 @@
         // Do not initialize the app before the Firebase bridge and Auth
         // persistence are ready. Otherwise a restored teacher session can be
         // mistaken for an anonymous user and all reads/writes appear denied.
-        window.onload = function() {
+        function startAuthBootstrap() {
+            if (window.__AUTH_BOOTSTRAP_STARTED) return;
+            window.__AUTH_BOOTSTRAP_STARTED = true;
             waitForBackendReady();
-        };
+        }
+        window.addEventListener('load', startAuthBootstrap);
+        // Some static/local compositions attach this script after the load
+        // event has already fired. Start immediately in that case as well.
+        if (document.readyState === 'complete') setTimeout(startAuthBootstrap, 0);
 
         function waitForBackendReady(attempt = 0) {
             const bridgeReady = !!(window.google && google.script && google.script.run);
@@ -248,7 +254,7 @@
                 // มี Session -> ตรวจสอบกับ Server
                 setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
                 
-                if (google.script.run.getCurrentUserProfile) {
+                if (window.google && google.script && google.script.run && google.script.run.getCurrentUserProfile) {
                     google.script.run
                         .withSuccessHandler((serverUser) => {
                             setLoading(false);
@@ -272,12 +278,66 @@
                             showLogin();
                         })
                         .getCurrentUserProfile(localUser.id);
+                } else if (window.__LOCAL_TEST_MODE__) {
+                    // Local Test has no server profile endpoint. The local
+                    // auth adapter already restored the identity, so re-use
+                    // the validated session and preserve the last tab.
+                    CURRENT_USER = localUser;
+                    saveSession(CURRENT_USER);
+                    renderAppByRole();
+                } else if (window.__SUPABASE_MODE__ && typeof window.firebaseSignInWithGoogle === 'function') {
+                    // In the GitHub Pages/Supabase build there is no
+                    // google.script.run profile endpoint. Revalidate the
+                    // persisted OAuth identity against app_users instead of
+                    // clearing a valid session during a normal reload.
+                    setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
+                    window.firebaseSignInWithGoogle().then((result) => {
+                        if (result && result.success && result.user) {
+                            CURRENT_USER = result.user;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            clearSession();
+                            setLoading(false);
+                            showLogin();
+                        }
+                    }).catch((error) => {
+                        console.warn('SUPABASE_SESSION_REVALIDATION_FAILED', error);
+                        clearSession();
+                        setLoading(false);
+                        showLogin();
+                    });
                 } else {
                     setLoading(false);
                     clearSession();
                     showLogin();
                 }
             } else {
+                // Local Test keeps its Firebase-compatible identity in the
+                // local adapter. Recreate the app session after a hard reload
+                // even when sessionStorage was not written before the page
+                // navigation completed. This branch is local-only.
+                const localAuthUser = window.__LOCAL_TEST_MODE__ && window.firebase && firebase.auth
+                    ? firebase.auth().currentUser
+                    : null;
+                if (localAuthUser && !localAuthUser.isAnonymous && typeof window.firebaseSignInWithGoogle === 'function') {
+                    setLoading(true, 'กำลังกู้คืนบัญชี Local Test...');
+                    window.firebaseSignInWithGoogle().then((result) => {
+                        if (result && result.success && result.user) {
+                            CURRENT_USER = result.user;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            setLoading(false);
+                            showLogin();
+                        }
+                    }).catch((error) => {
+                        console.warn('LOCAL_TEST_SESSION_RESTORE_FAILED', error);
+                        setLoading(false);
+                        showLogin();
+                    });
+                    return;
+                }
                 // Supabase OAuth may have just completed and established an
                 // auth session before the app sessionStorage record exists.
                 // Resolve that session once so the callback can enter the
