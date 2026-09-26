@@ -732,24 +732,49 @@
   }
   function resultError(message) { return { success: false, message }; }
   async function adminOnly() {
-    await ready();
-    if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
+    const identityUser = await verifiedIdentityUser();
+    if (String(identityUser && identityUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
-  async function teacherOrAdmin(payload) {
-    await ready();
-    const identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser;
-    const email = String(identityUser && identityUser.email || '').trim().toLowerCase();
-    if (email === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin', email };
-    if (!identityUser || identityUser.isAnonymous || !identityUser.id && !identityUser.uid || !email) {
+  async function verifiedIdentityUser() {
+    let identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__?.auth?.getSession) {
+      const result = await window.__SUPABASE_CLIENT__.auth.getSession();
+      identityUser = result?.data?.session?.user || identityUser;
+      if (identityUser) {
+        auth.currentUser = identityUser;
+        window.__FIREBASE_AUTH_USER = identityUser;
+      }
+    }
+    if (!identityUser) {
+      await ready();
+      identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    }
+    if (!identityUser || identityUser.isAnonymous || (!identityUser.id && !identityUser.uid) || !text(identityUser.email)) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
-    // Supabase app_users is the single source of staff identity. Do not use
-    // the retired Firebase authProfiles/authEmailIndex nodes for authorization.
+    return identityUser;
+  }
+  async function staffProfileForIdentity(identityUser) {
+    const email = text(identityUser && identityUser.email).toLowerCase();
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
+      const { data: row, error } = await window.__SUPABASE_CLIENT__.from('app_users').select('*').eq('email', email).maybeSingle();
+      if (error) throw error;
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      return { ...legacy, ...(row || {}) };
+    }
     const usersRoot = (await db.ref('/users').once('value')).val() || {};
-    const profile = Object.values(usersRoot).find((row) =>
+    return Object.values(usersRoot).find((row) =>
       text(row.Email || row.email).toLowerCase() === email ||
       text(row.AuthUID || row.auth_uid || row.uid).toLowerCase() === text(identityUser.id || identityUser.uid).toLowerCase()
     ) || {};
+  }
+  async function teacherOrAdmin(payload) {
+    const identityUser = await verifiedIdentityUser();
+    const email = String(identityUser && identityUser.email || '').trim().toLowerCase();
+    if (email === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin', email };
+    // Supabase app_users is the single source of staff identity. Do not use
+    // the retired Firebase authProfiles/authEmailIndex nodes for authorization.
+    const profile = await staffProfileForIdentity(identityUser);
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
@@ -866,15 +891,14 @@
     // This is on the login critical path and only needs the authenticated
     // teacher/admin identity record.
     if (name === 'getCurrentUserProfile') {
-      await ready();
+      const identityUser = await verifiedIdentityUser();
       const id = text(args[0]);
-      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
+      const email = String(identityUser?.email || '').trim().toLowerCase();
       let record = null;
       if (window.__SUPABASE_MODE__) {
-        const root = await data();
-        const users = values('users', root);
-        record = users.find((row) => text(row.UserID || row.userId || row.user_id) === id || text(row.Email || row.email).toLowerCase() === email) || null;
-        if (email === 'suradet.t@wrk.ac.th' && id === 'admin') record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        record = await staffProfileForIdentity(identityUser);
+        if (email === 'suradet.t@wrk.ac.th' && (id === 'admin' || !record || !Object.keys(record).length)) record = { UserID: 'admin', Username: email, Email: email, Name: identityUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        if (record && id && text(record.UserID || record.userId || record.user_id || record.id) !== id && email !== 'suradet.t@wrk.ac.th') record = null;
         return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
       }
       if (email === 'suradet.t@wrk.ac.th') {
