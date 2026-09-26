@@ -104,9 +104,9 @@
     // needs the canonical columns below; selecting the whole row makes a cold
     // PostgREST/RLS read much more likely to hit the server statement budget.
     const projections = {
-      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,level,room,status,due_date,display_order',
-      attendance: 'record_id,term_id,teacher_class_id,class_id,student_id,subject_code,attendance_date,status,note,recorder,timestamp,level,room',
-      scores: 'score_id,term_id,assignment_id,student_id,teacher_class_id,class_id,subject_code,level,room,score,is_submitted,timestamp'
+      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,due_date,level,room,status,legacy_data',
+      attendance: 'record_id,term_id,student_id,subject_code,attendance_date,status,note,recorder,legacy_data',
+      scores: 'score_id,term_id,assignment_id,student_id,subject_code,score,is_submitted,legacy_data'
     };
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
