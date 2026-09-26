@@ -1489,7 +1489,7 @@
 
 </script>
 
-<script src="./supabase-auth-client.js?v=auth-state-20260926"></script>
+<script src="./supabase-auth-client.js?v=auth-branch-20260926"></script>
 <script>
 /* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
 (function () {
@@ -10640,7 +10640,7 @@ var DATA_CONTROLLER = new DataController();
                 return;
             }
             const localUser = loadSession(); // ใช้ Helper ใหม่
-            console.error('CHECK_SESSION_STATE', { hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasAuthEmail: !!window.__AUTH_EMAIL, hasLocalUser: !!localUser, hasLocalEmail: !!(localUser?.email || localUser?.Email), localRole: localUser?.role || '' });
+            console.error('CHECK_SESSION_STATE:' + JSON.stringify({ hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasAuthEmail: !!window.__AUTH_EMAIL, hasLocalUser: !!localUser, hasLocalEmail: !!(localUser?.email || localUser?.Email), localRole: localUser?.role || '' }));
 
             // กันเหนียว: ถ้ามี localStorage ค้างมาจากระบบเก่า ให้ลบทิ้ง
             if (localStorage.getItem(SESSION_KEY)) {
@@ -10648,6 +10648,7 @@ var DATA_CONTROLLER = new DataController();
             }
 
             if (localUser && localUser.id) {
+                console.error('CHECK_SESSION_BRANCH:local');
                 // Staff sessions must always be backed by the current Google account.
                 // A sessionStorage record alone must never reopen a teacher/admin screen,
                 // because it can belong to another Chrome profile or another email.
@@ -10709,6 +10710,7 @@ var DATA_CONTROLLER = new DataController();
                     showLogin();
                 }
             } else if (window.__SUPABASE_AUTH_USER) {
+                console.error('CHECK_SESSION_BRANCH:supabase');
                 setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
                 loadSupabaseStaffProfile().then((normalizedUser) => {
                     setLoading(false);
@@ -10722,6 +10724,7 @@ var DATA_CONTROLLER = new DataController();
                     if (typeof Swal !== 'undefined') Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(err.message || err), 'error');
                 });
             } else {
+                console.error('CHECK_SESSION_BRANCH:login');
                 showLogin();
             }
         }
