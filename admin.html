@@ -7470,7 +7470,7 @@
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
         const roomOptions = subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean);
-        const roomValues = [...new Set(roomOptions.length ? roomOptions : (activeSubject && activeLevel ? [] : scopedRoomOptions))].sort(naturalSort);
+        const roomValues = [...new Set(roomOptions.length ? roomOptions : (activeSubject ? [] : scopedRoomOptions))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
