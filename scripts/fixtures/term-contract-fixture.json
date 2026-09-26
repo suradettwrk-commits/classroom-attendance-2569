@@ -1,0 +1,23 @@
+{
+  "terms": {
+    "term-1-2569": { "TermID": "term-1-2569", "TermNo": "1", "AcademicYear": "2569" }
+  },
+  "students": {
+    "S-001": { "StudentID": "S-001", "TermID": "term-1-2569", "Level": "ม.2", "Room": "8" }
+  },
+  "subjects": {
+    "ส22101": { "SubjectCode": "ส22101", "TermID": "term-1-2569" }
+  },
+  "teacherClasses": {
+    "TC-001": { "TeacherClassID": "TC-001", "TermID": "term-1-2569" }
+  },
+  "assignments": {
+    "A-001": { "AssignmentID": "A-001", "TermID": "term-1-2569" }
+  },
+  "attendance": {
+    "AT-001": { "RecordID": "AT-001", "TermID": "term-1-2569" }
+  },
+  "scores": {
+    "SC-001": { "ScoreID": "SC-001", "TermID": "term-1-2569" }
+  }
+}

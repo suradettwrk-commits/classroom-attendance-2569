@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const input = process.argv[2] || path.join(__dirname, '..', '_BACKUP_FIREBASE_LIVE_20260925_1030.json');
+const input = process.argv[2] || process.env.TERM_CONTRACT_INPUT || path.join(__dirname, 'fixtures', 'term-contract-fixture.json');
 const source = JSON.parse(fs.readFileSync(input, 'utf8'));
 const rows = value => Array.isArray(value) ? value : Object.values(value || {});
 const text = value => String(value == null ? '' : value).trim();

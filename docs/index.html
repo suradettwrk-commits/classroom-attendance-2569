@@ -8600,11 +8600,14 @@ var DATA_CONTROLLER = new DataController();
             stats: { present: 0, late: 0, leave: 0, absent: 0 },
             riskList: []
         };
+        // The Supabase bridge allows a cold read to complete for up to 30s.
+        // Keep this UI diagnostic above that circuit breaker so a successful
+        // cold response is not reported as a false warning at 12s.
         const timer = setTimeout(() => {
             if (window._dashboardStatsRequestId !== requestId) return;
             window._dashboardStatsLoadingTerm = '';
             console.warn('Dashboard stats still running', loadingKey);
-        }, 12000);
+        }, 35000);
         google.script.run.withSuccessHandler(s => { 
             clearTimeout(timer);
             if (window._dashboardStatsRequestId !== requestId) return;
