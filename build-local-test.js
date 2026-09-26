@@ -61,11 +61,11 @@ window.firebaseSignInWithGoogle = async function () {
   const role = new URLSearchParams(window.location.search || '').get('localRole') || 'admin';
   const auth = window.firebase.auth();
   const authResult = await auth.signInWithPopup(new window.firebase.auth.GoogleAuthProvider());
-  const email = role === 'teacher' ? 'teacher@example.test' : 'suradet.t@wrk.ac.th';
+  const email = role === 'teacher' ? 'suradett.wrk@eisth.org' : 'suradet.t@wrk.ac.th';
   return { success: true, user: {
-    id: role === 'teacher' ? 'teacher-1' : 'admin',
+    id: role === 'teacher' ? 'USR-20260616-144217' : 'admin',
     username: email,
-    name: role === 'teacher' ? 'ครูทดสอบ' : 'ผู้ดูแลระบบทดสอบ',
+    name: role === 'teacher' ? 'ครูสุรเดช ธรรมประโชติ' : 'ผู้ดูแลระบบทดสอบ',
     role, email, status: 'Active', imageUrl: '',
     authUser: authResult.user
   }};
@@ -75,8 +75,8 @@ if (new URLSearchParams(window.location.search || '').get('localAutoLogin') === 
     setTimeout(async function () {
       try {
         const result = await window.firebaseSignInWithGoogle();
-        window.CURRENT_USER = result.user;
-        if (typeof saveSession === 'function') saveSession(window.CURRENT_USER);
+        CURRENT_USER = result.user;
+        if (typeof saveSession === 'function') saveSession(CURRENT_USER);
         if (typeof renderAppByRole === 'function') renderAppByRole();
       } catch (error) {
         console.error('Local auto-login failed', error);

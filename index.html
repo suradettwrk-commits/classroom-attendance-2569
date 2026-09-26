@@ -106,28 +106,40 @@
             const bridgeReady = !!(window.google && google.script && google.script.run);
             const firebaseReady = !!(window.firebase && firebase.auth);
             const supabaseReady = !!(window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__);
+            const localTestReady = !!window.__LOCAL_TEST_MODE__;
             // GitHub/Supabase builds do not load the legacy Apps Script bridge.
             // Waiting for google.script here made a valid OAuth callback time out
             // and incorrectly return to the login screen.
-            if ((bridgeReady || supabaseReady) && firebaseReady) {
+            if ((bridgeReady || supabaseReady || localTestReady) && firebaseReady) {
                 if (!window.__authBootstrapPromise) {
-                    window.__authBootstrapPromise = Promise.resolve(window.__SUPABASE_CALLBACK_READY__)
-                        .catch(() => null)
-                        .then(() => new Promise((resolve) => {
-                        let settled = false;
-                        let unsubscribe = null;
-                        const finish = (user) => {
-                            if (settled) return;
-                            settled = true;
-                            if (unsubscribe) unsubscribe();
-                            resolve(user || null);
-                        };
-                        const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
-                        unsubscribe = firebase.auth().onAuthStateChanged((user) => {
-                            clearTimeout(timeout);
-                            finish(user);
+                    if (supabaseReady) {
+                        // Supabase already owns the persisted session. Do not
+                        // attach the Firebase-compatible auth listener here:
+                        // its later null callback can race the first restored
+                        // session and clear a valid staff session on reload.
+                        window.__authBootstrapPromise = Promise.resolve(window.__SUPABASE_CALLBACK_READY__)
+                            .catch(() => null)
+                            .then(async () => {
+                                const result = await window.__SUPABASE_CLIENT__.auth.getSession();
+                                return result?.data?.session?.user || window.__SUPABASE_CLIENT__.auth.currentUser || null;
+                            });
+                    } else {
+                        window.__authBootstrapPromise = new Promise((resolve) => {
+                            let settled = false;
+                            let unsubscribe = null;
+                            const finish = (user) => {
+                                if (settled) return;
+                                settled = true;
+                                if (unsubscribe) unsubscribe();
+                                resolve(user || null);
+                            };
+                            const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
+                            unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+                                clearTimeout(timeout);
+                                finish(user);
+                            });
                         });
-                        }));
+                    }
                 }
                 window.__authBootstrapPromise.then(async (user) => {
                     // Supabase may finish processing the OAuth callback just
@@ -139,6 +151,12 @@
                         user = (window.firebase && window.firebase.auth) ? window.firebase.auth().currentUser : null;
                     }
                     window.__FIREBASE_AUTH_USER = user || null;
+                    // Keep the Firebase-compatible facade in sync with the
+                    // restored Supabase identity. Existing data controllers
+                    // use firebase.auth().currentUser as their readiness gate.
+                    if (window.__SUPABASE_MODE__ && window.firebase && window.firebase.auth) {
+                        window.firebase.auth().currentUser = user || null;
+                    }
                     window.__AUTH_READY_STATE = user ? (user.isAnonymous ? 'anonymous' : 'authenticated') : 'missing';
                     checkSession();
                 });
