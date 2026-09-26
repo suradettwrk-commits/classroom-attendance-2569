@@ -7194,6 +7194,7 @@
     function gradingFillSelect(id, items, selected, label) {
         const el = getEl(id); if (!el) return;
         const values = (items || []).map(x => typeof x === 'object' ? { value: x.value || x.termId || x.code || '', label: label ? label(x) : (x.label || x.name || x.value || x.termId || x.code) } : { value: x, label: x }).filter(x => x.value !== '');
+        if (id === 'grading-subject' && !values.length && el.options.length) return;
         if (id === 'grading-level') values.sort((a,b) => gradingNumericPart(a.value) - gradingNumericPart(b.value) || String(a.value).localeCompare(String(b.value), 'th'));
         if (id === 'grading-room') values.sort((a,b) => (parseInt(a.value, 10) || 0) - (parseInt(b.value, 10) || 0) || String(a.value).localeCompare(String(b.value), 'th'));
         el.innerHTML = values.map(x => `<option value="${gradingEsc(x.value)}">${gradingEsc(x.label)}</option>`).join('');
