@@ -24,6 +24,12 @@
       if (!current && !hasOAuthCallback) return redirectToGoogle();
       return redirectToGoogle();
     }
+    // Make the verified Supabase identity available to the legacy application
+    // write queue immediately. Waiting only for the auth-state callback can
+    // leave the first save queued as "not connected" even though the user is
+    // already signed in.
+    window.__FIREBASE_AUTH_USER = authUser;
+    if (window.firebase && window.firebase.auth) window.firebase.auth().currentUser = authUser;
 
     const email = String(authUser.email || '').trim().toLowerCase();
     const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
