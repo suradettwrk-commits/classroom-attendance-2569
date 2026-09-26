@@ -254,6 +254,7 @@
                 return;
             }
             const localUser = loadSession(); // ใช้ Helper ใหม่
+            console.error('CHECK_SESSION_STATE', { hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasAuthEmail: !!window.__AUTH_EMAIL, hasLocalUser: !!localUser, hasLocalEmail: !!(localUser?.email || localUser?.Email), localRole: localUser?.role || '' });
 
             // กันเหนียว: ถ้ามี localStorage ค้างมาจากระบบเก่า ให้ลบทิ้ง
             if (localStorage.getItem(SESSION_KEY)) {
