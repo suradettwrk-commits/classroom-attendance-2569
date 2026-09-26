@@ -10,18 +10,20 @@
     return { success: false, redirecting: true };
   }
 
-  window.firebaseSignInWithGoogle = async function () {
+  window.firebaseSignInWithGoogle = async function (options = {}) {
     const supabase = window.__SUPABASE_CLIENT__;
     const hash = String(window.location.hash || '');
     const hasOAuthCallback = /(?:^|#|&)access_token=/.test(hash) || /(?:^|#|&)code=/.test(hash);
     const bridgeUser = window.firebase && window.firebase.auth ? window.firebase.auth().currentUser : null;
     const current = (supabase.auth && supabase.auth.currentUser) || bridgeUser;
     // First click starts OAuth immediately; callback/restore resolves the session.
-    if (!current && !hasOAuthCallback) return redirectToGoogle();
-
     const sessionResult = await supabase.auth.getSession();
     const authUser = sessionResult.data?.session?.user || supabase.auth.currentUser;
-    if (!authUser) return redirectToGoogle();
+    if (!authUser) {
+      if (options.revalidateOnly) return { success: false, noSession: true };
+      if (!current && !hasOAuthCallback) return redirectToGoogle();
+      return redirectToGoogle();
+    }
 
     const email = String(authUser.email || '').trim().toLowerCase();
     const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
