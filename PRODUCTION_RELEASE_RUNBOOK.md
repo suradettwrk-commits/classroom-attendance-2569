@@ -9,8 +9,9 @@
 3. รัน `npm run test:term-contract`
 4. รัน `npm run test:repository-contract`
 5. รัน `npm run test:release-contract`
-6. รัน `git diff --check`
-7. ใช้ Local Test ตรวจ Attendance วันที่ไม่มีข้อมูล: roster ต้องครบ, สถานะทั้ง 4 สีต้องเปลี่ยนได้, กดสถานะเดิมซ้ำต้องเคลียร์ และ reload แล้วต้องว่าง
+6. รัน `npm run test:ui-contract`
+7. รัน `git diff --check`
+8. ใช้ Local Test ตรวจ Attendance วันที่ไม่มีข้อมูล: roster ต้องครบ, สถานะทั้ง 4 สีต้องเปลี่ยนได้, กดสถานะเดิมซ้ำต้องเคลียร์ และ reload แล้วต้องว่าง
 
 ## Supabase migration
 
