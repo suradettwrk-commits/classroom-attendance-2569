@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact GitHub commit
         uses: actions/checkout@v4
       - name: Build static Firebase client
-        run: node build-github-pages.js
+        run: BUILD_VERSION="${{ github.sha }}" node build-github-pages.js
       - name: Deploy docs to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
