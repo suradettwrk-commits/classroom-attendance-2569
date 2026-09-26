@@ -47,6 +47,18 @@
   const listeners = [];
 
   function tableName(name) { return tableMap[name] || name; }
+  async function readAllRows(name) {
+    const rows = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await client.from(tableName(name)).select('*').range(offset, offset + pageSize - 1);
+      if (error) return { data: null, error };
+      const page = data || [];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return { data: rows, error: null };
+  }
   function keyOf(row, name) {
     const candidates = {
       terms: ['TermID', 'term_id', 'termId'], students: ['StudentID', 'student_id', 'studentId'],
@@ -74,8 +86,13 @@
     if (!force && rootPromise) return rootPromise;
     rootPromise = (async () => {
       const entries = await Promise.all(tableNames.map(async name => {
-        const { data, error } = await client.from(tableName(name)).select('*');
-        if (error) throw error;
+        const { data, error } = await readAllRows(name);
+        // A denied/optional table must not hide the core classroom data.
+        // Keep that table empty and let students, classes and records load.
+        if (error) {
+          console.warn(`SUPABASE_READ_SKIPPED:${tableName(name)}`, error.message || error);
+          return [name, {}];
+        }
         const map = {};
         (data || []).forEach(row => { const key = keyOf(row, name); if (key) map[key] = legacyRow(name, row); });
         return [name, map];

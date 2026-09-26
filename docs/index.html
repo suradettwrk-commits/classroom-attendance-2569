@@ -102,6 +102,18 @@ window.supabaseConfig = {
   const listeners = [];
 
   function tableName(name) { return tableMap[name] || name; }
+  async function readAllRows(name) {
+    const rows = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await client.from(tableName(name)).select('*').range(offset, offset + pageSize - 1);
+      if (error) return { data: null, error };
+      const page = data || [];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return { data: rows, error: null };
+  }
   function keyOf(row, name) {
     const candidates = {
       terms: ['TermID', 'term_id', 'termId'], students: ['StudentID', 'student_id', 'studentId'],
@@ -129,8 +141,13 @@ window.supabaseConfig = {
     if (!force && rootPromise) return rootPromise;
     rootPromise = (async () => {
       const entries = await Promise.all(tableNames.map(async name => {
-        const { data, error } = await client.from(tableName(name)).select('*');
-        if (error) throw error;
+        const { data, error } = await readAllRows(name);
+        // A denied/optional table must not hide the core classroom data.
+        // Keep that table empty and let students, classes and records load.
+        if (error) {
+          console.warn(`SUPABASE_READ_SKIPPED:${tableName(name)}`, error.message || error);
+          return [name, {}];
+        }
         const map = {};
         (data || []).forEach(row => { const key = keyOf(row, name); if (key) map[key] = legacyRow(name, row); });
         return [name, map];
@@ -2795,7 +2812,7 @@ var DATA_CONTROLLER = new DataController();
                     <button onclick="ATTENDANCE_MANAGER.saveAll()" id="btn-att-save-all" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100">
                         <i class="fa-solid fa-floppy-disk"></i> บันทึกทั้งหมด
                     </button>
-                    <button type="button" onclick="return printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
+                    <button type="button" onclick="printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
                 </div>
             </div>
 
@@ -2903,7 +2920,7 @@ var DATA_CONTROLLER = new DataController();
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
                     <button onclick="toggleNativeGradingAssignments()" id="grading-raw-toggle" class="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-list-check mr-1"></i>แสดงคะแนนงาน</button>
                     <button onclick="openNativeSGSModal()" class="bg-pink-50 text-pink-700 border border-pink-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-table-list mr-1"></i>ข้อมูลลง SGS</button>
-                    <button type="button" onclick="return printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
+                    <button type="button" onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
                     <button onclick="saveNativeGradingData()" id="grading-save-btn" class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow"><i class="fa-solid fa-floppy-disk mr-1"></i>บันทึกเกรด</button>
                 </div>
             </div>
@@ -5935,11 +5952,7 @@ var DATA_CONTROLLER = new DataController();
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = html; 
-            // Keep the call in the click handler. A delayed window.print() can
-            // be ignored by browsers after the user activation has expired.
-            document.documentElement.offsetHeight;
-            window.focus();
-            window.print();
+            setTimeout(() => window.print(), 500);
         };
 
         const downloadImage = () => {
@@ -7016,9 +7029,7 @@ var DATA_CONTROLLER = new DataController();
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML;
-            document.documentElement.offsetHeight;
-            window.focus();
-            window.print();
+            setTimeout(() => window.print(), 500);
         }
         return false;
     }
@@ -9590,10 +9601,7 @@ var DATA_CONTROLLER = new DataController();
         let style = getEl('dynamic-print-style');
         if (!style) { style = document.createElement('style'); style.id = 'dynamic-print-style'; document.head.appendChild(style); }
         style.innerHTML = '@media print { @page { size: portrait; margin: 10mm; } }';
-        document.documentElement.offsetHeight;
-        window.focus();
-        window.print();
-        return false;
+        setTimeout(() => window.print(), 500);
     }
     ['grading-term','grading-subject','grading-level','grading-room','grading-w-pre','grading-w-mid','grading-w-post','grading-w-final','grading-goal'].forEach(id => { const el = getEl(id); if (el) el.addEventListener('change', () => { if ((id.startsWith('grading-w-') || id === 'grading-goal') && window.NATIVE_GRADING.data) { window.NATIVE_GRADING.settingsDirty = true; window.NATIVE_GRADING.revision = (window.NATIVE_GRADING.revision || 0) + 1; renderNativeGradingTable(window.NATIVE_GRADING.data); scheduleNativeGradingAutosave(); } else if (['grading-term','grading-subject','grading-level','grading-room'].includes(id)) { if (gradingHasPendingEdits()) { const last = window.NATIVE_GRADING.lastFilter || {}; const map = { 'grading-term':'term', 'grading-subject':'subject', 'grading-level':'level', 'grading-room':'room' }; if (last[map[id]]) el.value = last[map[id]]; return gradingSetStatus('ยังมีคะแนนตัดเกรดค้างบันทึก กรุณารอให้บันทึกเสร็จก่อนเปลี่ยนห้องหรือวิชา', 'error'); } loadNativeGradingData(); } }); });
     window.addEventListener('beforeunload', e => { if (gradingHasPendingEdits()) { e.preventDefault(); e.returnValue = ''; } });

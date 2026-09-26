@@ -1,0 +1,29 @@
+name: Test and build
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact GitHub commit
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check JavaScript syntax
+        run: |
+          node --check build-github-pages.js
+          node --check firebase-bridge.js
+          node --check supabase-auth.js
+          node --check supabase-compat.js
+      - name: Build GitHub Pages artifact
+        run: node build-github-pages.js
+      - name: Verify generated artifact
+        run: test -s docs/index.html && ! grep -q 'imported_students' docs/index.html
