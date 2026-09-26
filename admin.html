@@ -2792,6 +2792,24 @@
                                 // before the local/server snapshot is ready and
                                 // leave only the student shell visible.
                                 SCORES_MANAGER.fetchData(0, { forceServer: true });
+                                // A cold browser session can finish the first
+                                // scoped listener before its data snapshot is
+                                // ready. If the tab is still showing its empty
+                                // state, retry the same read path briefly so
+                                // opening the tab behaves like pressing the
+                                // refresh button once.
+                                const retryEmptyScoreGrid = (retry = 0) => {
+                                    if (retry >= 4 || !isTabVisible('tab-scores')) return;
+                                    setTimeout(() => {
+                                        const empty = getEl('sc-empty');
+                                        const filtersReady = getEl('sc-subject')?.value && getEl('sc-level')?.value && getEl('sc-room')?.value;
+                                        if (filtersReady && empty && !empty.classList.contains('hidden')) {
+                                            SCORES_MANAGER.fetchData(0, { forceServer: true });
+                                            retryEmptyScoreGrid(retry + 1);
+                                        }
+                                    }, 900);
+                                };
+                                retryEmptyScoreGrid();
                                 return;
                             }
                             if (attempt < 10) setTimeout(() => loadScoresWhenReady(attempt + 1), 120);
