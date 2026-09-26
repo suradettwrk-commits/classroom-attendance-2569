@@ -8454,7 +8454,10 @@ var DATA_CONTROLLER = new DataController();
             syncTeacherClassesBootstrap(data.teacherClasses || [], term);
         }
         // [SUBJECTS-FIX] อ่าน subjects จากทั้ง data.subjects และ fallback data.dropdowns.subjects
-        if (_subjectsRaw.length > 0 || data.subjects !== undefined) {
+        // Do not erase a catalog that was already hydrated by the direct
+        // read-only subject fallback when a partial bootstrap returns
+        // `subjects: []`.
+        if (_subjectsRaw.length > 0 || !Array.isArray(window.SUBJECTS_CACHE)) {
             window.SUBJECTS_CACHE = _subjectsRaw;
             renderSubjectsTable(window.SUBJECTS_CACHE);
             if (_subjectsRaw.length === 0) console.warn('SUBJECTS_RENDER count=0 — sheet อาจว่างหรือ term ไม่ตรง');
