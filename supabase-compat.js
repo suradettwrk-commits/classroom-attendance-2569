@@ -67,9 +67,23 @@
   }
   function termFilterCandidates(termRows, requestedTerm) {
     const active = (termRows || []).find(row => text(row && (row.status || row.Status)).toLowerCase() === 'active') || (termRows || [])[0];
-    const requested = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
-    if (!requested) return [];
-    const candidates = new Set([requested]);
+    const requestedRaw = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
+    if (!requestedRaw) return [];
+    // The display label is a UI value, not a database key. Once the term row
+    // resolves it, query activity tables by canonical term_id only. This
+    // avoids a second full/RLS scan for an unindexed legacy label.
+    const requestedRow = (termRows || []).find(row => {
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      const termId = text(row && (row.term_id || row.termId || row.TermID));
+      const labels = [
+        row && (row.display_label || row.term || row.Term),
+        row && `${row.term_no || row.termNo || row.TermNo || ''}/${row.academic_year || row.academicYear || row.AcademicYear || ''}`,
+        legacy.display_label || legacy.term || legacy.Term,
+        `${legacy.term_no || legacy.termNo || legacy.TermNo || ''}/${legacy.academic_year || legacy.academicYear || legacy.AcademicYear || ''}`
+      ].map(text).filter(Boolean);
+      return (termId && sameTerm(termId, requestedRaw)) || labels.some(label => sameTerm(label, requestedRaw));
+    });
+    const candidates = new Set([text(requestedRow && (requestedRow.term_id || requestedRow.termId || requestedRow.TermID)) || requestedRaw]);
     (termRows || []).forEach(row => {
       const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
       const termId = text(row && (row.term_id || row.termId || row.TermID));
@@ -79,7 +93,7 @@
         legacy.display_label || legacy.term || legacy.Term,
         `${legacy.term_no || legacy.termNo || legacy.TermNo || ''}/${legacy.academic_year || legacy.academicYear || legacy.AcademicYear || ''}`
       ].map(text).filter(Boolean);
-      if (termId && labels.some(label => sameTerm(label, requested))) candidates.add(termId);
+      if (termId && labels.some(label => sameTerm(label, requestedRaw)) && !requestedRow) candidates.add(termId);
     });
     return [...candidates];
   }
