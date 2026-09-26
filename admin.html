@@ -2012,26 +2012,36 @@
             const realtimeDashboard = (data, date) => {
                 const rows = value => Array.isArray(value) ? value : Object.values(value || {});
                 const students = rows(data.students);
-                const studentIds = new Set(students.map(s => String(s.id || s.studentId || '').trim()));
-                const attendance = rows(data.attendance).filter(r => studentIds.has(String(r.studentId || '').trim()));
-                const dayRows = date ? attendance.filter(r => String(r.date || '').slice(0, 10) === date) : attendance;
-                const status = r => String(r.status || '').trim().toLowerCase();
+                const field = (row, names) => {
+                    for (const name of names) {
+                        if (row && row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== '') return row[name];
+                    }
+                    return '';
+                };
+                const studentId = s => String(field(s, ['id', 'studentId', 'StudentID', 'student_id']) || '').trim();
+                const levelOf = s => String(field(s, ['level', 'Level', 'classLevel', 'class_level']) || '').trim();
+                const roomOf = s => String(field(s, ['room', 'Room', 'classRoom', 'class_room']) || '').trim();
+                const studentIds = new Set(students.map(studentId).filter(Boolean));
+                const attendance = rows(data.attendance).filter(r => studentIds.has(String(field(r, ['studentId', 'StudentID', 'student_id']) || '').trim()));
+                const dayRows = date ? attendance.filter(r => String(field(r, ['date', 'Date', 'attendanceDate', 'attendance_date']) || '').slice(0, 10) === date) : attendance;
+                const status = r => String(field(r, ['status', 'Status', 'attendanceStatus', 'attendance_status']) || '').trim().toLowerCase();
                 const count = (rows, names) => rows.filter(r => names.includes(status(r))).length;
                 const present = count(dayRows, ['present', 'มา', 'มาเรียน']);
                 const late = count(dayRows, ['late', 'สาย']);
                 const leave = count(dayRows, ['leave', 'ลา']);
                 const absent = count(dayRows, ['absent', 'ขาด']);
-                const byId = Object.fromEntries(students.map(s => [String(s.id || '').trim(), s]));
+                const byId = Object.fromEntries(students.map(s => [studentId(s), s]).filter(([id]) => id));
                 const absentByStudent = {};
-                attendance.forEach(r => { if (['absent', 'ขาด'].includes(status(r))) { const id = String(r.studentId || '').trim(); absentByStudent[id] = (absentByStudent[id] || 0) + 1; } });
-                const riskList = Object.entries(absentByStudent).sort((a,b) => b[1] - a[1]).slice(0, 5).map(([id, n]) => ({ name: byId[id] ? byId[id].name : id, absentCount: n, status: n > 3 ? 'เฝ้าระวัง' : 'ติดตาม' }));
+                attendance.forEach(r => { if (['absent', 'ขาด'].includes(status(r))) { const id = String(field(r, ['studentId', 'StudentID', 'student_id']) || '').trim(); absentByStudent[id] = (absentByStudent[id] || 0) + 1; } });
+                const displayName = s => String(field(s, ['name', 'fullName', 'displayName']) || `${field(s, ['prefix', 'Prefix']) || ''}${field(s, ['firstName', 'FirstName']) || ''} ${field(s, ['lastName', 'LastName']) || ''}`).trim();
+                const riskList = Object.entries(absentByStudent).sort((a,b) => b[1] - a[1]).slice(0, 5).map(([id, n]) => ({ name: byId[id] ? displayName(byId[id]) : id, absentCount: n, status: n > 3 ? 'เฝ้าระวัง' : 'ติดตาม' }));
                 const classes = {};
-                students.forEach(s => { const key = `${s.level || ''}|${s.room || ''}`; classes[key] = classes[key] || { level: s.level || '', room: s.room || '', totalStudents: 0, present: 0, late: 0, leave: 0, absent: 0 }; classes[key].totalStudents += 1; });
-                attendance.forEach(r => { const s = byId[String(r.studentId || '').trim()]; if (!s) return; const c = classes[`${s.level || ''}|${s.room || ''}`]; if (!c) return; const v = status(r); if (['present', 'มา', 'มาเรียน'].includes(v)) c.present += 1; else if (['late', 'สาย'].includes(v)) c.late += 1; else if (['leave', 'ลา'].includes(v)) c.leave += 1; else if (['absent', 'ขาด'].includes(v)) c.absent += 1; });
+                students.forEach(s => { const level = levelOf(s), room = roomOf(s), key = `${level}|${room}`; if (!level || !room) return; classes[key] = classes[key] || { level, room, totalStudents: 0, present: 0, late: 0, leave: 0, absent: 0 }; classes[key].totalStudents += 1; });
+                attendance.forEach(r => { const s = byId[String(field(r, ['studentId', 'StudentID', 'student_id']) || '').trim()]; if (!s) return; const c = classes[`${levelOf(s)}|${roomOf(s)}`]; if (!c) return; const v = status(r); if (['present', 'มา', 'มาเรียน'].includes(v)) c.present += 1; else if (['late', 'สาย'].includes(v)) c.late += 1; else if (['leave', 'ลา'].includes(v)) c.leave += 1; else if (['absent', 'ขาด'].includes(v)) c.absent += 1; });
                 const classSummary = Object.values(classes).map(c => ({ ...c, attendanceRate: (c.present + c.late + c.leave + c.absent) ? Math.round((c.present + c.late) / (c.present + c.late + c.leave + c.absent) * 100) : 0 }));
                 const termSummary = classSummary.reduce((out, c) => { ['present', 'late', 'leave', 'absent'].forEach(k => out[k] += c[k]); return out; }, { present: 0, late: 0, leave: 0, absent: 0 });
                 const termAssignmentCount = data.meta && Number.isFinite(Number(data.meta.termAssignmentCount)) ? Number(data.meta.termAssignmentCount) : rows(data.assignments).length;
-                return { success: true, totalStudents: students.length, presentToday: present, totalAssignments: termAssignmentCount, riskStudents: Object.values(absentByStudent).filter(n => n > 3).length, stats: { present, late, leave, absent }, riskList, classSummary, termSummary };
+                return { success: true, term: normalizeTermForUI(data.meta && data.meta.term) || window.CURRENT_SERVER_TERM || getCurrentTerm(), totalStudents: students.length, presentToday: present, totalAssignments: termAssignmentCount, riskStudents: Object.values(absentByStudent).filter(n => n > 3).length, stats: { present, late, leave, absent }, riskList, classSummary, termSummary };
             };
             window.__buildRealtimeDashboardStats = realtimeDashboard;
             window.addEventListener('firebase-realtime-update', (event) => {
@@ -2039,9 +2049,14 @@
                 const data = detail && detail.data;
                 if (!data) return;
                 populateSelects({ term: data.meta && data.meta.term, subjects: data.subjects || [], levels: data.levels || [], rooms: data.rooms || [], combos: data.combos || [], teacherClasses: data.teacherClasses || [], studentsLite: data.students || [] });
+                if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
                 if (data.meta && data.meta.term) updateGlobalTerm(normalizeTermForUI(data.meta.term));
                 const realtimeRows = value => Array.isArray(value) ? value : Object.values(value || {});
-                const hasCompleteDashboardRows = detail.initial === true || (realtimeRows(data.students).length > 0 && realtimeRows(data.attendance).length > 0 && realtimeRows(data.assignments).length > 0);
+                // A valid snapshot may legitimately have no attendance for the
+                // selected day (or no assignments yet). Render the dashboard
+                // from the students snapshot anyway so the empty-state text,
+                // term summary, and risk table stay truthful.
+                const hasCompleteDashboardRows = detail.initial === true || realtimeRows(data.students).length > 0;
                 if (hasCompleteDashboardRows) {
                     const date = getEl('dash-date') && getEl('dash-date').value;
                     const stats = realtimeDashboard(data, date);
@@ -2397,7 +2412,7 @@
             }
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
             const opts = subjects.map(s => `<option value="${s.code}">${getSubjectDisplayLabel(s)}</option>`).join('');
-            ['att-subject', 'sc-subject', 'asn-subject', 'grading-subject'].forEach(id => { 
+            ['att-subject', 'sc-subject', 'asn-subject', 'grading-subject'].forEach(id => {
                 const el = getEl(id);
                 if (el) {
                     const currentVal = el.value;
@@ -5844,6 +5859,8 @@
     function renderDashboardStats(s) {
         s = s || {};
         window.LAST_DASHBOARD_STATS = s;
+        const dashboardTerm = normalizeTermForUI(s.term || window.CURRENT_SERVER_TERM || getCurrentTerm());
+        if (getEl('header-term')) getEl('header-term').innerText = dashboardTerm || 'ยังไม่ระบุเทอม';
         if(getEl('dash-total-student')) getEl('dash-total-student').innerText=s.totalStudents; 
         if(getEl('dash-present-today')) getEl('dash-present-today').innerText=s.presentToday;
         if(getEl('dash-total-assigns')) getEl('dash-total-assigns').innerText=s.totalAssignments;
@@ -5857,14 +5874,15 @@
             const total = s.stats.present + s.stats.late + s.stats.leave + s.stats.absent;
             if (total > 0) { const pP = (s.stats.present/total)*100, pL = (s.stats.late/total)*100, pLe = (s.stats.leave/total)*100, pA = (s.stats.absent/total)*100; getEl('dash-chart-container').innerHTML = `<div class="flex h-6 w-full rounded-full overflow-hidden mb-2 bg-slate-100"><div class="bg-green-500 h-full" style="width: ${pP}%"></div><div class="bg-yellow-400 h-full" style="width: ${pL}%"></div><div class="bg-blue-400 h-full" style="width: ${pLe}%"></div><div class="bg-red-500 h-full" style="width: ${pA}%"></div></div><div class="flex flex-wrap gap-4 text-xs font-bold text-slate-600"><span class="flex items-center gap-1"><div class="w-3 h-3 bg-green-500 rounded-full"></div> มา (${s.stats.present})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-yellow-400 rounded-full"></div> สาย (${s.stats.late})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-blue-400 rounded-full"></div> ลา (${s.stats.leave})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-red-500 rounded-full"></div> ขาด (${s.stats.absent})</span></div>`; } else { getEl('dash-chart-container').innerHTML = '<p class="text-sm text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในวันที่นี้</p>'; }
         }
-        if(s.riskList && getEl('dash-risk-table')) { if(s.riskList.length > 0) { getEl('dash-risk-table').innerHTML = s.riskList.map(r => `<tr><td class="p-3 text-slate-700 font-bold">${r.name}</td><td class="p-3 text-right text-red-600 font-mono font-bold">${r.absentCount || r.count || 0} ครั้ง</td><td class="p-3 text-center"><span class="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full">${r.status || 'เฝ้าระวัง'}</span></td></tr>`).join(''); } else { getEl('dash-risk-table').innerHTML = '<tr><td colspan="3" class="p-4 text-center text-green-500"><i class="fa-solid fa-check-circle mr-2"></i>ไม่มีนักเรียนกลุ่มเสี่ยง</td></tr>'; } }
+        if(getEl('dash-risk-table')) { const riskList = Array.isArray(s.riskList) ? s.riskList : []; if(riskList.length > 0) { getEl('dash-risk-table').innerHTML = riskList.map(r => `<tr><td class="p-3 text-slate-700 font-bold">${r.name}</td><td class="p-3 text-right text-red-600 font-mono font-bold">${r.absentCount || r.count || 0} ครั้ง</td><td class="p-3 text-center"><span class="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full">${r.status || 'เฝ้าระวัง'}</span></td></tr>`).join(''); } else { getEl('dash-risk-table').innerHTML = '<tr><td colspan="3" class="p-4 text-center text-green-500"><i class="fa-solid fa-check-circle mr-2"></i>ไม่มีนักเรียนกลุ่มเสี่ยง</td></tr>'; } }
         
-        if(s.classSummary && getEl('dash-term-summary-table')) {
-            if(s.classSummary.length > 0) {
+        if(getEl('dash-term-summary-table')) {
+            const classSummary = Array.isArray(s.classSummary) ? s.classSummary : [];
+            if(classSummary.length > 0) {
                 const chart = getEl('dash-term-summary-chart');
-                if (chart) { const top = s.classSummary.slice().sort((a,b) => b.attendanceRate - a.attendanceRate).slice(0, 10); chart.innerHTML = `<div class="text-xs font-bold text-slate-500 mb-2">ห้องที่มีอัตราการมาเรียนสูงสุด (10 อันดับ)</div><div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">${top.map(c => `<div class="flex items-center gap-2 text-xs"><span class="w-14 font-bold text-slate-600">${normalizeClassLabel(c.level)}/${c.room}</span><div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full ${c.attendanceRate >= 80 ? 'bg-green-500' : (c.attendanceRate >= 60 ? 'bg-yellow-400' : 'bg-red-500')}" style="width:${c.attendanceRate}%"></div></div><span class="w-10 text-right font-mono font-bold text-slate-500">${c.attendanceRate}%</span></div>`).join('')}</div>`; }
+                if (chart) { const top = classSummary.slice().sort((a,b) => b.attendanceRate - a.attendanceRate).slice(0, 10); chart.innerHTML = `<div class="text-xs font-bold text-slate-500 mb-2">ห้องที่มีอัตราการมาเรียนสูงสุด (10 อันดับ)</div><div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">${top.map(c => `<div class="flex items-center gap-2 text-xs"><span class="w-14 font-bold text-slate-600">${normalizeClassLabel(c.level)}/${c.room}</span><div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full ${c.attendanceRate >= 80 ? 'bg-green-500' : (c.attendanceRate >= 60 ? 'bg-yellow-400' : 'bg-red-500')}" style="width:${c.attendanceRate}%"></div></div><span class="w-10 text-right font-mono font-bold text-slate-500">${c.attendanceRate}%</span></div>`).join('')}</div>`; }
                 let html = '';
-                const visibleClasses = window.DASH_TERM_SUMMARY_EXPANDED ? s.classSummary : s.classSummary.slice(0, 6);
+                const visibleClasses = window.DASH_TERM_SUMMARY_EXPANDED ? classSummary : classSummary.slice(0, 6);
                 visibleClasses.forEach(c => {
                     html += `<tr class="hover:bg-slate-50 border-b border-slate-50 last:border-0 transition">
                         <td class="p-3 text-slate-600 font-bold">${normalizeClassLabel(c.level)}/${c.room}</td>
@@ -5884,10 +5902,10 @@
                     </tr>`;
                 });
                 
-                if (!window.DASH_TERM_SUMMARY_EXPANDED && s.classSummary.length > visibleClasses.length) html += `<tr><td colspan="7" class="p-3 text-center text-xs text-indigo-600 font-bold">มีอีก ${s.classSummary.length - visibleClasses.length} ห้อง กด “แสดงรายละเอียด” เพื่อดูทั้งหมด</td></tr>`;
+                if (!window.DASH_TERM_SUMMARY_EXPANDED && classSummary.length > visibleClasses.length) html += `<tr><td colspan="7" class="p-3 text-center text-xs text-indigo-600 font-bold">มีอีก ${classSummary.length - visibleClasses.length} ห้อง กด “แสดงรายละเอียด” เพื่อดูทั้งหมด</td></tr>`;
                 // Add totals row
                 if (s.termSummary) {
-                    const totalStudents = s.classSummary.reduce((sum, c) => sum + c.totalStudents, 0);
+                    const totalStudents = classSummary.reduce((sum, c) => sum + c.totalStudents, 0);
                     const t = s.termSummary;
                     const totalAtt = t.present + t.late + t.leave + t.absent;
                     const tRate = totalAtt > 0 ? Math.round((t.present + t.late) / totalAtt * 100) : 0;
@@ -5911,6 +5929,8 @@
                 }
                 getEl('dash-term-summary-table').innerHTML = html;
             } else {
+                const chart = getEl('dash-term-summary-chart');
+                if (chart) chart.innerHTML = '<div class="text-xs font-bold text-slate-500 mb-2">ห้องที่มีอัตราการมาเรียนสูงสุด (10 อันดับ)</div><p class="text-sm text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในวันที่นี้</p>';
                 getEl('dash-term-summary-table').innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-400"><i class="fa-solid fa-folder-open text-2xl mb-2 block"></i> ยังไม่มีข้อมูลสำหรับเทอมนี้</td></tr>';
             }
         }
@@ -7301,26 +7321,36 @@
         const rows = value => Array.isArray(value) ? value : Object.values(value || {});
         const classSources = []
             .concat(rows(boot.teacherClasses))
+            .concat(rows(boot.dropdowns && boot.dropdowns.teacherClasses))
+            .concat(rows(boot.dropdowns && boot.dropdowns.combos))
             .concat(rows(liveDb.teacherClasses))
             .concat(rows(liveDb.combos))
+            .concat(rows(liveDb.classCombos))
+            .concat(rows(window.CLASS_COMBOS))
             // Local Test exposes the exact backup snapshot. This fallback is
             // local-only; production continues to use Firebase bootstrap and
             // realtime data above.
             .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.teacherClasses) : []);
+        const classValue = (c, names) => {
+            for (const name of names) {
+                if (c && c[name] !== undefined && c[name] !== null && String(c[name]).trim() !== '') return String(c[name]).trim();
+            }
+            return '';
+        };
         const allClasses = [...new Map(classSources.map(c => {
-            const key = [c.teacherId || c.TeacherID || '', c.subjectCode || c.SubjectCode || c.subject || '', c.level || c.Level || '', c.room || c.Room || ''].join('|');
+            const key = [classValue(c, ['teacherId', 'TeacherID', 'teacher_id']), classValue(c, ['subjectCode', 'SubjectCode', 'subject', 'subject_code']), classValue(c, ['level', 'Level', 'classLevel', 'class_level']), classValue(c, ['room', 'Room', 'classRoom', 'class_room'])].join('|');
             return [key, c];
-        })).values()];
+        }).filter(([key]) => key.replace(/\|/g, '') !== '')).values()];
         const termMatchesClass = c => {
             const raw = String(c.termId || c.TermID || c.term || c.Term || '').trim();
             return !raw || normalizeTermForUI(raw) === normalizeTermForUI(selectedTerm);
         };
         const termClasses = allClasses.filter(termMatchesClass);
         const usableClasses = termClasses.length ? termClasses : allClasses;
-        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || String(c.teacherId || c.TeacherID || '') === teacherId));
-        const classSubject = c => String(c.subjectCode || c.SubjectCode || c.subject || '');
-        const classLevel = c => String(c.level || c.Level || '');
-        const classRoom = c => String(c.room || c.Room || '');
+        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
+        const classSubject = c => classValue(c, ['subjectCode', 'SubjectCode', 'subject', 'subject_code']);
+        const classLevel = c => classValue(c, ['level', 'Level', 'classLevel', 'class_level']);
+        const classRoom = c => classValue(c, ['room', 'Room', 'classRoom', 'class_room']);
         const scopedSubjectCodes = new Set(scopedClasses.map(classSubject).filter(Boolean));
         const subjectSource = rows(window.__SHARED_SUBJECTS).length
             ? rows(window.__SHARED_SUBJECTS)
@@ -7366,10 +7396,11 @@
         const subjectClasses = role === 'admin'
             ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
-        const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))];
+        const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
+        const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const roomValues = [...new Set(subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean))];
+        const roomValues = [...new Set(subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
