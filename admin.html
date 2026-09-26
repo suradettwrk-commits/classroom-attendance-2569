@@ -2708,6 +2708,7 @@
     }
 
     function switchTab(tab) {
+        try { sessionStorage.setItem('LAST_ADMIN_TAB', String(tab || 'dashboard')); } catch (e) {}
         if (CURRENT_USER && String(CURRENT_USER.role || '').toLowerCase() === 'attendance_assistant' && tab !== 'attendance') tab = 'attendance';
         // [FIX] ปิดเมนูมือถืออัตโนมัติเมื่อกดเลือกเมนูเสร็จ
         if (window.innerWidth < 768) {

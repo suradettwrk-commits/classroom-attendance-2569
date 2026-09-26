@@ -211,6 +211,11 @@
                 const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
                 const adminEmail = 'suradet.t@wrk.ac.th';
+                if (staffRole && window.__SUPABASE_MODE__ && !firebaseUser && window.__AUTH_READY_STATE === 'pending') {
+                    setLoading(true, 'กำลังกู้คืนบัญชี Google...');
+                    setTimeout(checkSession, 350);
+                    return;
+                }
                 const emailMismatch = staffRole && firebaseUser && (
                     (localRole === 'admin' && authEmail !== adminEmail) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
@@ -342,10 +347,11 @@
         function renderAppByRole() {
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-            const firebaseEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
+            const identityUser = firebaseUser || window.__FIREBASE_AUTH_USER || (window.__SUPABASE_CLIENT__ && window.__SUPABASE_CLIENT__.auth && window.__SUPABASE_CLIENT__.auth.currentUser);
+            const firebaseEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
             const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const identityOk = ['admin', 'teacher'].includes(role) && (
-                firebaseUser && !firebaseUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
+                identityUser && !identityUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
             );
             if (!identityOk) {
                 clearSession();
@@ -369,6 +375,10 @@
                 if (window.__ADMIN_INIT_DONE_FOR_USER_TERM !== initKey) {
                     window.__ADMIN_INIT_DONE_FOR_USER_TERM = initKey;
                     if(typeof initAdminDashboard === 'function') initAdminDashboard();
+                    try {
+                        const lastTab = sessionStorage.getItem('LAST_ADMIN_TAB');
+                        if (lastTab && lastTab !== 'dashboard' && typeof switchTab === 'function') setTimeout(() => switchTab(lastTab), 250);
+                    } catch (e) {}
                 }
             } else {
                 clearSession();
