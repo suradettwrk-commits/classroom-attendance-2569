@@ -4336,7 +4336,7 @@
                     return;
                 }
                 state.loadingKey = requestKey;
-                console.warn('DATA_CONTROLLER attendance lazy/empty, falling back to server...');
+                console.info('DATA_CONTROLLER attendance lazy/empty, using server fallback');
                 google.script.run
                     .withSuccessHandler(function(res) {
                         if (!isCurrentRequest()) return;

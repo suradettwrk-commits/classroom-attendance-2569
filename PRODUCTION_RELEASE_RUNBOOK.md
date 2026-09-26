@@ -32,7 +32,7 @@
 
 - `Dashboard stats still running` ต้องไม่เกิดก่อน 35 วินาที; ถ้าเกิดหลังจากนั้นให้ตรวจ Supabase query/RLS/index
 - `SUPABASE_READ_SKIPPED:*` เป็นปัญหาจริง ไม่ควรกลบด้วยการปิด log; ตรวจ table policy, index และ statement timeout
-- `DATA_CONTROLLER attendance lazy/empty` อาจเกิดใน cold start ได้ แต่ต้องมี `ATT_SERVER_RESPONSE` และ roster ต้องแสดงครบ
+- `DATA_CONTROLLER attendance lazy/empty` เป็น info ใน cold start ได้ แต่ต้องมี `ATT_SERVER_RESPONSE` และ roster ต้องแสดงครบ
 - `cdn.tailwindcss.com` เป็น technical debt ที่ควรย้ายไป static CSS build ก่อนรอบ production hardening ถัดไป
 
 ## Recovery
