@@ -2706,9 +2706,15 @@
                 // Wait for that bootstrap on a fresh browser session so filters are
                 // never rendered empty just because the tab was opened first.
                 const waitForSharedData = (startedAt = Date.now()) => {
-                    const ready = window.CURRENT_SERVER_TERM && (window.ADMIN_SETTINGS_BOOTSTRAP || window.SUBJECTS_CACHE);
+                    const rows = value => Array.isArray(value) ? value : Object.values(value || {});
+                    const liveSubjects = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? rows(DATA_CONTROLLER.db.subjects).length : 0;
+                    const bootstrapSubjects = window.ADMIN_SETTINGS_BOOTSTRAP ? rows(window.ADMIN_SETTINGS_BOOTSTRAP.subjects).length : 0;
+                    const cachedSubjects = rows(window.SUBJECTS_CACHE).length;
+                    const ready = window.CURRENT_SERVER_TERM && (liveSubjects || bootstrapSubjects || cachedSubjects);
                     if (ready || Date.now() - startedAt > 12000) {
-                        loadAdminSettingsBootstrap(false, () => loadNativeGradingData());
+                        // Always refresh this shared source when opening grading;
+                        // an empty cached bootstrap must never hide real subjects.
+                        loadAdminSettingsBootstrap(true, () => loadNativeGradingData());
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
                     }
