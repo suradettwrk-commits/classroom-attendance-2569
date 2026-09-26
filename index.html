@@ -354,6 +354,7 @@
                 return;
             }
             window.__AUTH_READY_STATE = 'verified';
+            setLoading(false);
             const loginPage = document.getElementById('page-login');
             const appPage = document.getElementById('page-app');
             const adminContainer = document.getElementById('container-admin');
