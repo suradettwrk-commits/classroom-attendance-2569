@@ -8,6 +8,7 @@
   let currentUser = null;
   window.__SUPABASE_AUTH_USER = null;
   window.__AUTH_EMAIL = '';
+  const mark = (stage) => { try { document.documentElement.dataset.supabaseAuthStage = stage; } catch (_) {} console.error(`SUPABASE_AUTH_STAGE:${stage}`); };
   const publish = (session) => {
     currentUser = session?.user || null;
     window.__SUPABASE_AUTH_USER = currentUser;
@@ -21,23 +22,26 @@
   const createVerifier = () => base64Url(crypto.getRandomValues(new Uint8Array(32)));
   const createChallenge = async (verifier) => base64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const exchangeCode = async (code) => {
+    mark('code-found');
     // GitHub Pages performs a top-level redirect through Google. Keep a
     // sessionStorage copy for normal tabs and a short-lived localStorage
     // fallback for browsers/extensions that recreate the document context.
     const verifier = sessionStorage.getItem(PKCE_KEY) || localStorage.getItem(PKCE_KEY);
-    if (!verifier) { console.error('Supabase PKCE verifier missing'); return null; }
+    if (!verifier) { mark('verifier-missing'); console.error('Supabase PKCE verifier missing'); return null; }
+    mark('exchange-start');
     try {
       const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
         method: 'POST', headers: { apikey: PUBLIC_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ auth_code: code, code_verifier: verifier })
       });
       const body = await response.text();
-      if (!response.ok) { console.error('Supabase PKCE exchange failed', response.status, body); return null; }
+      if (!response.ok) { mark(`exchange-failed-${response.status}`); console.error('Supabase PKCE exchange failed', response.status, body); return null; }
       const session = JSON.parse(body);
       console.info('Supabase PKCE exchange succeeded', { hasAccessToken: !!session.access_token, hasRefreshToken: !!session.refresh_token, hasUser: !!session.user });
+      mark('exchange-success');
       return writeSession(session);
     } catch (error) {
-      console.error('Supabase PKCE exchange exception', String(error));
+      mark('exchange-exception'); console.error('Supabase PKCE exchange exception', String(error));
       return null;
     } finally {
       sessionStorage.removeItem(PKCE_KEY);
@@ -59,6 +63,7 @@
     return writeSession(await response.json());
   };
   window.supabaseAuthReady = async function () {
+    mark('bootstrap-start');
     const query = new URLSearchParams(window.location.search || '');
     if (query.get('code')) {
       await exchangeCode(query.get('code'));
@@ -75,10 +80,12 @@
     if (!session?.access_token) return publish(null);
     const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: PUBLIC_KEY, Authorization: `Bearer ${session.access_token}` } });
     if (!response.ok) {
+      mark(`user-failed-${response.status}`);
       console.error('Supabase user verification failed', response.status, await response.text().catch(() => ''));
       return writeSession(null);
     }
     const user = await response.json();
+    mark('user-success');
     const verified = publish({ ...session, user });
     console.info('Supabase Auth ready', { email: window.__AUTH_EMAIL, userId: user?.id || '' });
     return verified;
