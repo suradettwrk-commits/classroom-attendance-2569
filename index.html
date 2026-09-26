@@ -111,7 +111,9 @@
             // and incorrectly return to the login screen.
             if ((bridgeReady || supabaseReady) && firebaseReady) {
                 if (!window.__authBootstrapPromise) {
-                    window.__authBootstrapPromise = new Promise((resolve) => {
+                    window.__authBootstrapPromise = Promise.resolve(window.__SUPABASE_CALLBACK_READY__)
+                        .catch(() => null)
+                        .then(() => new Promise((resolve) => {
                         let settled = false;
                         let unsubscribe = null;
                         const finish = (user) => {
@@ -125,7 +127,7 @@
                             clearTimeout(timeout);
                             finish(user);
                         });
-                    });
+                        }));
                 }
                 window.__authBootstrapPromise.then(async (user) => {
                     // Supabase may finish processing the OAuth callback just
