@@ -275,6 +275,13 @@
                     (localRole === 'admin' && authEmail !== adminEmail) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
                 );
+                // A session from an older Google account must not block the
+                // current Supabase identity. Clear only this tab's legacy
+                // session, then restart the Supabase profile bootstrap.
+                if (emailMismatch && window.__SUPABASE_AUTH_USER) {
+                    clearSession();
+                    return checkSession();
+                }
                 if (staffRole && (!identityUser || (identityUser.isAnonymous && !window.__SUPABASE_AUTH_USER) || emailMismatch)) {
                     clearSession();
                     setLoading(false);
