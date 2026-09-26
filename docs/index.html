@@ -139,7 +139,7 @@ window.supabaseConfig = {
   }
   async function readAllRows(name, termCandidates) {
     const rows = [];
-    const pageSize = 1000;
+    const pageSize = 500;
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
     // compatibility layer is always consumed for one active term at a time,
@@ -147,16 +147,22 @@ window.supabaseConfig = {
     // that term. This is read-only and does not alter stored data.
     const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
     const term = termScoped ? activeTermHint() : '';
-    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [];
-    for (let offset = 0; ; offset += pageSize) {
-      let query = client.from(tableName(name)).select('*');
-      if (terms.length > 1) query = query.in('term_id', terms);
-      else if (terms.length === 1) query = query.eq('term_id', terms[0]);
-      const { data, error } = await query.range(offset, offset + pageSize - 1);
-      if (error) return { data: null, error };
-      const page = data || [];
-      rows.push(...page);
-      if (page.length < pageSize) break;
+    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [''];
+    if (termScoped && !terms.length) return { data: [], error: null };
+    // Avoid one large IN(...) statement. On the live dataset that query can
+    // exceed PostgREST's statement timeout even when each term-specific read
+    // is small enough. Reading each canonical/legacy term separately keeps
+    // the compatibility layer read-only and allows both aliases to coexist.
+    for (const termValue of terms) {
+      for (let offset = 0; ; offset += pageSize) {
+        let query = client.from(tableName(name)).select('*');
+        if (termValue) query = query.eq('term_id', termValue);
+        const { data, error } = await query.range(offset, offset + pageSize - 1);
+        if (error) return { data: null, error };
+        const page = data || [];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
     }
     return { data: rows, error: null };
   }
