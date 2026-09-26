@@ -1489,7 +1489,7 @@
 
 </script>
 
-<script src="./supabase-auth-client.js?v=auth-branch-20260926"></script>
+<script src="./supabase-auth-client.js?v=identity-diagnostic-20260926"></script>
 <script>
 /* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
 (function () {
@@ -10816,6 +10816,7 @@ var DATA_CONTROLLER = new DataController();
             const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
                 identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && ((role === 'admin' && identityEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === identityEmail))
             );
+            console.error('IDENTITY_CHECK_STATE:' + JSON.stringify({ role, hasIdentity: !!identityUser, hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasExpectedEmail: !!expectedEmail, emailsEqual: !!expectedEmail && expectedEmail === identityEmail, identityOk }));
             if (!identityOk) {
                 clearSession();
                 CURRENT_USER = null;
