@@ -7270,6 +7270,18 @@
         if (!normalizedSubjects.length) {
             normalizedSubjects = [...scopedSubjectCodes].map(code => ({ code, name: code, term: selectedTerm }));
         }
+        if (!normalizedSubjects.length) {
+            // The scores filter is hydrated from the same central catalog and
+            // may already be ready while the grading bootstrap is partial.
+            // Reuse those native options instead of showing an empty grading
+            // subject selector.
+            const sharedSubjectSelect = getEl('sc-subject');
+            if (sharedSubjectSelect) {
+                normalizedSubjects = [...sharedSubjectSelect.options]
+                    .filter(option => option.value)
+                    .map(option => ({ code: option.value, name: option.textContent.replace(option.value, '').trim(), term: selectedTerm }));
+            }
+        }
         const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
