@@ -10,6 +10,7 @@ const corsFor = (request: Request) => ({ "Access-Control-Allow-Origin": ALLOWED_
 const json = (body: unknown, status = 200, request?: Request) => new Response(JSON.stringify(body), { status, headers: { ...corsFor(request || new Request("https://localhost")), "Content-Type": "application/json" } });
 const enc = (v: unknown) => encodeURIComponent(String(v ?? ""));
 const text = (v: unknown) => String(v ?? "").trim();
+const normalizeEmail = (v: unknown) => text(v).normalize("NFKC").toLowerCase();
 const api = async (path: string, init: RequestInit = {}) => {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json", ...(init.headers || {}) } });
   const body = await response.text();
@@ -80,7 +81,7 @@ async function authenticate(request: Request) {
     });
     if (response.ok) {
       const user = await response.json();
-      email = text(user?.email).toLowerCase();
+      email = normalizeEmail(user?.email);
     }
   } catch (_) {
     // Keep the Firebase compatibility path below during the migration window.
@@ -95,7 +96,7 @@ async function authenticate(request: Request) {
   }
   if (!email) throw new Error("ไม่พบอีเมลใน Login Token");
   if (ADMIN_EMAILS.has(email)) return { admin: true, teacherId: "admin" };
-  const profiles = await api(`auth_profiles?select=legacy_user_id,role,status&email=eq.${enc(email)}&limit=10`);
+  const profiles = await api(`auth_profiles?select=legacy_user_id,role,status,email&email=ilike.${enc(email)}&limit=10`);
   const profile = profiles.find((p: any) => text(p.status).toLowerCase() === "active" && text(p.role).toLowerCase() === "teacher");
   if (!profile?.legacy_user_id) throw new Error("บัญชีครูยังไม่ได้รับอนุมัติ");
   return { admin: false, teacherId: profile.legacy_user_id };
@@ -124,12 +125,13 @@ Deno.serve(async (request) => {
     if (action === "bootstrap") return json(await bootstrapData(auth), 200, request);
     if (action === "dashboard") return json(await dashboardData(auth, body.term), 200, request);
     if (action === "profile") {
-      const requestedEmail = text(body.email).toLowerCase();
+      const requestedEmail = normalizeEmail(body.email);
       if (auth.admin && ADMIN_EMAILS.has(requestedEmail)) {
         return json({success:true, data:{id:"admin",username:requestedEmail.split("@")[0],email:requestedEmail,role:"admin",status:"Active"}}, 200, request);
       }
-      const profiles = await api(`app_users?email=eq.${enc(requestedEmail)}&select=user_id,username,email,role,status&limit=1`);
-      return json({success:!!profiles[0], data:profiles[0] ? {id:profiles[0].user_id,username:profiles[0].username,email:profiles[0].email,role:profiles[0].role,status:profiles[0].status} : null}, 200, request);
+      const profiles = await api(`app_users?email=ilike.${enc(requestedEmail)}&select=user_id,username,email,role,status&limit=10`);
+      const profile = profiles.find((row: any) => normalizeEmail(row.email) === requestedEmail && text(row.status).toLowerCase() !== "inactive");
+      return json({success:!!profile, data:profile ? {id:profile.user_id,username:profile.username,email:normalizeEmail(profile.email),role:profile.role,status:profile.status} : null}, 200, request);
     }
     const ctx = await context(body, auth);
     if (action === "load") return json(output(ctx), 200, request);

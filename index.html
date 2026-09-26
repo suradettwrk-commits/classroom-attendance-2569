@@ -207,6 +207,25 @@
             localStorage.removeItem(SESSION_KEY);
         }
 
+        async function loadSupabaseStaffProfile() {
+            const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
+            const sessionResult = await window.__SUPABASE_CLIENT.auth.getSession();
+            const session = sessionResult && sessionResult.data && sessionResult.data.session;
+            if (!session || !session.access_token || !window.__AUTH_EMAIL) throw new Error('ไม่พบ Supabase session สำหรับโหลดโปรไฟล์');
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                body: JSON.stringify({ action: 'profile', email: window.__AUTH_EMAIL })
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || result.success === false || !result.data) {
+                console.error('Supabase direct profile bootstrap failed', { status: response.status, message: result.message || '' });
+                throw new Error(result.message || `โหลดโปรไฟล์ไม่สำเร็จ (${response.status})`);
+            }
+            console.info('Supabase direct profile bootstrap succeeded', { email: result.data.email, role: result.data.role });
+            return result.data;
+        }
+
         // --- B) Check Session (Updated) ---
         function checkSession() {
             const assistantLink = getAssistantLinkParams();
@@ -295,23 +314,19 @@
                     clearSession();
                     showLogin();
                 }
-            } else if (window.__SUPABASE_AUTH_USER && google.script.run.getCurrentUserProfile) {
+            } else if (window.__SUPABASE_AUTH_USER) {
                 setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
-                google.script.run
-                    .withSuccessHandler((serverUser) => {
-                        setLoading(false);
-                        const normalizedUser = (serverUser && serverUser.success && serverUser.data) ? serverUser.data : serverUser;
-                if (!normalizedUser || !normalizedUser.id) {
-                    console.error('Supabase profile bootstrap returned no user', { email: window.__AUTH_EMAIL, response: serverUser });
+                loadSupabaseStaffProfile().then((normalizedUser) => {
+                    setLoading(false);
+                    CURRENT_USER = normalizedUser;
+                    saveSession(CURRENT_USER);
+                    renderAppByRole();
+                }).catch((err) => {
+                    setLoading(false);
                     showLogin();
-                    return;
-                }
-                        CURRENT_USER = normalizedUser;
-                        saveSession(CURRENT_USER);
-                        renderAppByRole();
-                    })
-                    .withFailureHandler((err) => { setLoading(false); showLogin(); console.warn('Supabase profile sync failed', err); })
-                    .getCurrentUserProfile(window.__AUTH_EMAIL);
+                    console.warn('Supabase profile sync failed', err);
+                    if (typeof Swal !== 'undefined') Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(err.message || err), 'error');
+                });
             } else {
                 showLogin();
             }
