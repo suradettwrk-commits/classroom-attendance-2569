@@ -67,38 +67,15 @@
                 <p class="text-sm font-semibold text-school-secondary">กลุ่มสาระสังคมศึกษา ศาสนาและวัฒนธรรม</p>
                 <p class="text-xs text-slate-500 mt-1">โรงเรียนวัดไร่ขิงวิทยา | ครูสุรเดช ธรรมประโชติ</p>
 
-                <form id="login-form" onsubmit="handleLogin(event)" class="mt-8 space-y-4 text-left">
-                    <div>
-                            <label class="text-xs font-bold text-slate-500 ml-1">เลขประจำตัวนักเรียน / ชื่อผู้ใช้ครู</label>
-                        <div class="relative">
-                            <i class="fa-solid fa-user absolute left-3 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="text" id="login-user" required 
-                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
-                                placeholder="นักเรียน: เลขประจำตัว | ครู: Username ที่ตั้งค่าไว้">
-                        </div>
-                    </div>
-             
-                    <div>
-                        <label class="text-xs font-bold text-slate-500 ml-1">รหัสผ่าน</label>
-                        <div class="relative">
-                            <i class="fa-solid fa-lock absolute left-3 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="password" id="login-pass" required 
-                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
-                                placeholder="ระบุรหัสผ่าน">
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="w-full bg-school-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-900 active:scale-95 transition flex items-center justify-center gap-2">
-                        <span>เข้าสู่ระบบ</span>
-                        <i class="fa-solid fa-arrow-right"></i>
+                <div id="login-form" class="mt-8 space-y-4 text-left">
+                    <button type="button" onclick="handleAdminGoogleLogin()" class="w-full bg-school-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-900 active:scale-95 transition flex items-center justify-center gap-2">
+                        <i class="fa-brands fa-google text-red-500"></i><span>เข้าสู่ระบบครู/แอดมินด้วย Google</span>
                     </button>
-                    <button type="button" onclick="handleAdminGoogleLogin()" class="w-full border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-2">
-                        <i class="fa-brands fa-google text-red-500"></i><span>เข้าสู่ระบบแอดมินด้วย Google</span>
-                    </button>
-                </form>
+                    <p class="text-center text-xs text-slate-500">สำหรับครูและผู้ดูแลระบบเท่านั้น</p>
+                </div>
 
                 <div class="mt-6 text-[10px] text-slate-400 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                    <p><i class="fa-solid fa-circle-info mr-1"></i> นักเรียน: รหัสผ่านคือ <b>wrk</b> ตามด้วยเลขประจำตัว | ครู: ใช้ Username/Password จากเมนูตั้งค่า</p>
+                    <p><i class="fa-solid fa-circle-info mr-1"></i> กรุณาเข้าสู่ระบบด้วย Google ของครูหรือผู้ดูแลระบบที่ได้รับอนุมัติ</p>
                     <p class="mt-1 opacity-50 text-[9px]">ระบบสำหรับผู้มีสิทธิ์ใช้งานเท่านั้น</p>
                 </div>
             </div>
@@ -111,9 +88,6 @@
         <div id="container-admin" class="hidden h-full">
             <?!= include('admin'); ?> 
         </div>
-        <div id="container-student" class="hidden h-full">
-            <?!= include('student'); ?>
-        </div>
     </div>
 
     <script>
@@ -121,26 +95,49 @@
         window.__AUTH_READY_STATE = 'pending';
         const SESSION_KEY = 'wrk_school_session'; // Define session key
 
-        // Do not initialize the app before both compatibility bridges and
-        // Supabase Auth session restoration are ready.
+        // Do not initialize the app before the Firebase bridge and Auth
+        // persistence are ready. Otherwise a restored teacher session can be
+        // mistaken for an anonymous user and all reads/writes appear denied.
         window.onload = function() {
             waitForBackendReady();
         };
 
         function waitForBackendReady(attempt = 0) {
             const bridgeReady = !!(window.google && google.script && google.script.run);
-            const authReady = !!window.supabaseAuthReady;
             const firebaseReady = !!(window.firebase && firebase.auth);
-            if (bridgeReady && firebaseReady && authReady) {
+            const supabaseReady = !!(window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__);
+            // GitHub/Supabase builds do not load the legacy Apps Script bridge.
+            // Waiting for google.script here made a valid OAuth callback time out
+            // and incorrectly return to the login screen.
+            if ((bridgeReady || supabaseReady) && firebaseReady) {
                 if (!window.__authBootstrapPromise) {
-                    // The auth bridge starts its bootstrap once while loading.
-                    // Reuse that promise so a PKCE callback is never exchanged twice.
-                    window.__authBootstrapPromise = window.__SUPABASE_AUTH_READY || window.supabaseAuthReady();
+                    window.__authBootstrapPromise = new Promise((resolve) => {
+                        let settled = false;
+                        let unsubscribe = null;
+                        const finish = (user) => {
+                            if (settled) return;
+                            settled = true;
+                            if (unsubscribe) unsubscribe();
+                            resolve(user || null);
+                        };
+                        const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
+                        unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+                            clearTimeout(timeout);
+                            finish(user);
+                        });
+                    });
                 }
-                window.__authBootstrapPromise.then((session) => {
-                    const user = session?.user || window.__SUPABASE_AUTH_USER || null;
-                    window.__FIREBASE_AUTH_USER = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-                    window.__AUTH_READY_STATE = user ? 'authenticated' : 'missing';
+                window.__authBootstrapPromise.then(async (user) => {
+                    // Supabase may finish processing the OAuth callback just
+                    // after the initial auth-state callback reports null.
+                    // Give its URL/session handler a short settling window
+                    // before deciding that the staff user is unauthenticated.
+                    if (!user && window.__SUPABASE_MODE__) {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        user = (window.firebase && window.firebase.auth) ? window.firebase.auth().currentUser : null;
+                    }
+                    window.__FIREBASE_AUTH_USER = user || null;
+                    window.__AUTH_READY_STATE = user ? (user.isAnonymous ? 'anonymous' : 'authenticated') : 'missing';
                     checkSession();
                 });
                 return;
@@ -155,20 +152,6 @@
                 return;
             }
             setTimeout(() => waitForBackendReady(attempt + 1), 250);
-        }
-
-        function getAssistantLinkParams() {
-            const params = new URLSearchParams(window.location.search || '');
-            const isAssistant = params.get('assistant') === '1' || params.get('mode') === 'assistant';
-            const uid = (params.get('uid') || params.get('sid') || '').trim();
-            if (!isAssistant || !uid) return null;
-            return {
-                uid,
-                term: (params.get('term') || '').trim(),
-                subject: (params.get('subject') || params.get('subjectCode') || '').trim(),
-                level: (params.get('level') || '').trim(),
-                room: (params.get('room') || '').trim()
-            };
         }
 
         // --- A) Helper Functions (Session Isolation) ---
@@ -207,60 +190,9 @@
             localStorage.removeItem(SESSION_KEY);
         }
 
-        async function loadSupabaseStaffProfile() {
-            const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
-            const sessionResult = await window.__SUPABASE_CLIENT.auth.getSession();
-            const session = sessionResult && sessionResult.data && sessionResult.data.session;
-            if (!session || !session.access_token || !window.__AUTH_EMAIL) throw new Error('ไม่พบ Supabase session สำหรับโหลดโปรไฟล์');
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-                body: JSON.stringify({ action: 'profile', email: window.__AUTH_EMAIL })
-            });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.success === false || !result.data) {
-                console.error('Supabase direct profile bootstrap failed', { status: response.status, message: result.message || '' });
-                throw new Error(result.message || `โหลดโปรไฟล์ไม่สำเร็จ (${response.status})`);
-            }
-            console.info('Supabase direct profile bootstrap succeeded', { email: result.data.email, role: result.data.role });
-            const profile = result.data;
-            if (!profile.name) {
-                profile.name = window.__SUPABASE_AUTH_USER?.user_metadata?.full_name ||
-                               window.__SUPABASE_AUTH_USER?.user_metadata?.name ||
-                               (profile.role === 'admin' ? 'สุรเดช ธรรมประโชติ' : profile.username || 'ผู้ใช้งาน');
-            }
-            return profile;
-        }
-
         // --- B) Check Session (Updated) ---
         function checkSession() {
-            const assistantLink = getAssistantLinkParams();
-            if (assistantLink) {
-                clearSession();
-                setLoading(true, 'กำลังเปิดหน้าเช็คชื่อผู้ช่วย...');
-                google.script.run
-                    .withSuccessHandler((response) => {
-                        setLoading(false);
-                        if (response && response.success && response.user && response.user.role === 'attendance_assistant') {
-                            CURRENT_USER = response.user;
-                            CURRENT_USER.assistantLink = assistantLink;
-                            saveSession(CURRENT_USER);
-                            renderAppByRole();
-                        } else {
-                            showLogin();
-                            Swal.fire('เปิดลิงก์ไม่ได้', 'นักเรียนคนนี้ยังไม่ได้รับสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ', 'error');
-                        }
-                    })
-                    .withFailureHandler((err) => {
-                        setLoading(false);
-                        showLogin();
-                        Swal.fire('เปิดลิงก์ไม่ได้', String(err), 'error');
-                    })
-                    .loginSystem(assistantLink.uid, assistantLink.uid);
-                return;
-            }
             const localUser = loadSession(); // ใช้ Helper ใหม่
-            console.error('CHECK_SESSION_STATE:' + JSON.stringify({ hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasAuthEmail: !!window.__AUTH_EMAIL, hasLocalUser: !!localUser, hasLocalEmail: !!(localUser?.email || localUser?.Email), localRole: localUser?.role || '' }));
 
             // กันเหนียว: ถ้ามี localStorage ค้างมาจากระบบเก่า ให้ลบทิ้ง
             if (localStorage.getItem(SESSION_KEY)) {
@@ -268,30 +200,20 @@
             }
 
             if (localUser && localUser.id) {
-                console.error('CHECK_SESSION_BRANCH:local');
                 // Staff sessions must always be backed by the current Google account.
                 // A sessionStorage record alone must never reopen a teacher/admin screen,
                 // because it can belong to another Chrome profile or another email.
                 const localRole = String(localUser.role || '').toLowerCase();
-                const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(localRole);
+                const staffRole = ['admin', 'teacher'].includes(localRole);
                 const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-                const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
-                const authEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
+                const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
-                const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-                const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
-                const emailMismatch = staffRole && identityUser && (
-                    (localRole === 'admin' && (!isAdminEmail(authEmail) || savedEmail !== authEmail)) ||
+                const adminEmail = 'suradet.t@wrk.ac.th';
+                const emailMismatch = staffRole && firebaseUser && (
+                    (localRole === 'admin' && authEmail !== adminEmail) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
                 );
-                // A session from an older Google account must not block the
-                // current Supabase identity. Clear only this tab's legacy
-                // session, then restart the Supabase profile bootstrap.
-                if (emailMismatch && window.__SUPABASE_AUTH_USER) {
-                    clearSession();
-                    return checkSession();
-                }
-                if (staffRole && (!identityUser || (identityUser.isAnonymous && !window.__SUPABASE_AUTH_USER) || emailMismatch)) {
+                if (staffRole && (!firebaseUser || firebaseUser.isAnonymous || emailMismatch)) {
                     clearSession();
                     setLoading(false);
                     showLogin();
@@ -330,23 +252,33 @@
                     clearSession();
                     showLogin();
                 }
-            } else if (window.__SUPABASE_AUTH_USER) {
-                console.error('CHECK_SESSION_BRANCH:supabase');
-                setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
-                loadSupabaseStaffProfile().then((normalizedUser) => {
-                    setLoading(false);
-                    CURRENT_USER = normalizedUser;
-                    saveSession(CURRENT_USER);
-                    renderAppByRole();
-                }).catch((err) => {
-                    setLoading(false);
-                    showLogin();
-                    console.warn('Supabase profile sync failed', err);
-                    if (typeof Swal !== 'undefined') Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(err.message || err), 'error');
-                });
             } else {
-                console.error('CHECK_SESSION_BRANCH:login');
-                showLogin();
+                // Supabase OAuth may have just completed and established an
+                // auth session before the app sessionStorage record exists.
+                // Resolve that session once so the callback can enter the
+                // same staff flow without requiring a second login click.
+                const callbackUser = window.__SUPABASE_MODE__ && window.__FIREBASE_AUTH_USER;
+                const supabaseSessionReady = window.__SUPABASE_MODE__ && window.__SUPABASE_SESSION_READY__;
+                if ((callbackUser && !callbackUser.isAnonymous || supabaseSessionReady) && typeof window.firebaseSignInWithGoogle === 'function') {
+                    setLoading(true, 'กำลังยืนยันบัญชี Google...');
+                    window.firebaseSignInWithGoogle().then((result) => {
+                        if (result && result.success && result.user) {
+                            CURRENT_USER = result.user;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            setLoading(false);
+                            showLogin();
+                        }
+                    }).catch((error) => {
+                        console.warn('SUPABASE_OAUTH_CALLBACK_FAILED', error);
+                        setLoading(false);
+                        showLogin();
+                    });
+                } else {
+                    // ไม่มี Session -> ไปหน้า Login
+                    showLogin();
+                }
             }
         }
 
@@ -358,10 +290,38 @@
         async function handleAdminGoogleLogin() {
             try {
                 setLoading(true, 'กำลังตรวจสอบบัญชี Google...');
-                await window.supabaseSignInWithGoogle();
+                const result = await window.firebaseSignInWithGoogle();
+                if (result && result.redirecting) return;
+                setLoading(false);
+                if (result.needsSetup) {
+                    // Do not leave an unapproved Google identity authenticated
+                    // after the staff gate rejects it. A later reload must not
+                    // inherit that identity as a valid staff session.
+                    try { await firebase.auth().signOut(); } catch (signOutError) { console.warn('Unauthorized Google sign-out failed', signOutError); }
+                    Swal.fire('ยังไม่มีสิทธิ์ใช้งาน', `อีเมล ${result.email || ''} ยังไม่ได้เพิ่มโดยผู้ดูแลระบบ กรุณาให้แอดมินเพิ่มอีเมลนี้ใน Users ก่อน`, 'error');
+                    return;
+                }
+                CURRENT_USER = result.user;
+                saveSession(CURRENT_USER);
+                    renderAppByRole();
             } catch (error) {
                 setLoading(false);
-                Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
+                const code = String(error?.code || '');
+                if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+                    Swal.fire(
+                        'หน้าต่าง Google ถูกปิด',
+                        'หน้าต่างยืนยันตัวตนถูกปิดก่อนเสร็จสิ้น หากกำลังทดสอบบนเครื่องนี้ ให้ใช้ Local Test Browser; หากใช้ระบบจริง ให้เปิดผ่าน HTTPS และอนุญาต popup ของ Google',
+                        'warning'
+                    );
+                } else if (code === 'auth/popup-blocked') {
+                    Swal.fire(
+                        'เบราว์เซอร์บล็อกหน้าต่าง Google',
+                        'อนุญาต popup สำหรับเว็บไซต์นี้แล้วลองใหม่ หรือใช้ Local Test Browser สำหรับการทดสอบโดยไม่เชื่อม Firebase จริง',
+                        'warning'
+                    );
+                } else {
+                    Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
+                }
             }
         }
 
@@ -376,73 +336,15 @@
             try { const saved = await new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).submitTeacherAccessRequest(result.value)); if (!saved?.success) throw new Error(saved?.message || 'ส่งคำขอไม่สำเร็จ'); await firebase.auth().signOut(); await Swal.fire('ส่งคำขอแล้ว', saved.message, 'success'); } catch (error) { await firebase.auth().signOut(); await Swal.fire('ส่งคำขอไม่สำเร็จ', String(error.message || error), 'error'); }
         }
 
-        // --- C) Handle Login (Updated) ---
-        function handleLogin(e) {
-            e.preventDefault();
-            const userEl = document.getElementById('login-user');
-            const passEl = document.getElementById('login-pass');
-            if(!userEl || !passEl) return;
-
-            const user = userEl.value.trim();
-            const pass = passEl.value.trim();
-            if(!user || !pass) {
-                Swal.fire('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบถ้วน', 'warning');
-                return;
-            }
-
-            setLoading(true, 'กำลังตรวจสอบข้อมูล...');
-            google.script.run
-                .withSuccessHandler((response) => {
-                    setLoading(false);
-                    if (response.success) {
-                        const role = String(response.user && response.user.role || '').toLowerCase();
-                        if (['admin', 'teacher', 'attendance_assistant'].includes(role)) {
-                            clearSession();
-                            Swal.fire('กรุณาเข้าสู่ระบบด้วย Google', 'บัญชีเจ้าหน้าที่ต้องใช้ Google ตามอีเมลที่ผู้ดูแลระบบกำหนด เพื่อป้องกันการใช้ session ของผู้ใช้อื่น', 'info');
-                            return;
-                        }
-                        CURRENT_USER = response.user; 
-                        
-                        // [CHANGE] ใช้ saveSession แทน localStorage.setItem
-                        saveSession(CURRENT_USER);
-                        
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'ยินดีต้อนรับ',
-                            text: `สวัสดีครับ/ค่ะ ${CURRENT_USER.name}`,
-                            timer: 1500,
-                            showConfirmButton: false
-                        }).then(() => {
-                            renderAppByRole();
-                        });
-                    } else {
-                        Swal.fire('เข้าสู่ระบบไม่สำเร็จ', response.message, 'error');
-                        passEl.value = '';
-                    }
-                })
-                .withFailureHandler((error) => {
-                    setLoading(false);
-                    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้: ' + error, 'error');
-                })
-                .loginSystem(user, pass);
-        }
-
         // 3. Render หน้าจอตามสิทธิ์ (FIXED FOR TEACHER ROLE)
         function renderAppByRole() {
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-            const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
-            const identityEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
+            const firebaseEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
             const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
-            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-            const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
-            const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
-                identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && (
-                    (role === 'admin' && isAdminEmail(identityEmail) && expectedEmail === identityEmail) ||
-                    (role !== 'admin' && expectedEmail === identityEmail)
-                )
+            const identityOk = ['admin', 'teacher'].includes(role) && (
+                firebaseUser && !firebaseUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
             );
-            console.error('IDENTITY_CHECK_STATE:' + JSON.stringify({ role, hasIdentity: !!identityUser, hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasExpectedEmail: !!expectedEmail, emailsEqual: !!expectedEmail && expectedEmail === identityEmail, identityOk }));
             if (!identityOk) {
                 clearSession();
                 CURRENT_USER = null;
@@ -451,17 +353,14 @@
                 console.warn('STAFF_RENDER_BLOCKED: no matching Google Auth identity.');
                 return;
             }
-            window.__AUTH_READY_STATE = ['admin', 'teacher', 'attendance_assistant'].includes(role) ? 'verified' : 'authenticated';
+            window.__AUTH_READY_STATE = 'verified';
             const loginPage = document.getElementById('page-login');
             const appPage = document.getElementById('page-app');
             const adminContainer = document.getElementById('container-admin');
-            const studentContainer = document.getElementById('container-student');
-
             if(loginPage) loginPage.classList.add('hidden');
             if(appPage) appPage.classList.remove('hidden');
             
-            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teacher' || CURRENT_USER.role === 'attendance_assistant') {
-                if(studentContainer) studentContainer.classList.add('hidden');
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teacher') {
                 if(adminContainer) adminContainer.classList.remove('hidden');
                 const initKey = [CURRENT_USER.id || '', CURRENT_USER.role || '', window.CURRENT_SERVER_TERM || ''].join('_');
                 if (window.__ADMIN_INIT_DONE_FOR_USER_TERM !== initKey) {
@@ -469,12 +368,13 @@
                     if(typeof initAdminDashboard === 'function') initAdminDashboard();
                 }
             } else {
-                Swal.fire('ยังไม่เปิดใช้งาน', 'ขณะนี้ยังไม่เปิดหน้า Student Portal สำหรับนักเรียน', 'info');
-                resetToLogin();
-                return;
+                clearSession();
+                CURRENT_USER = null;
                 if(adminContainer) adminContainer.classList.add('hidden');
-                if(studentContainer) studentContainer.classList.remove('hidden');
-                if(typeof initStudentDashboard === 'function') initStudentDashboard();
+                if(appPage) appPage.classList.add('hidden');
+                showLogin();
+                setLoading(false);
+                Swal.fire('ไม่มีสิทธิ์ใช้งาน', 'ระบบนี้เปิดให้เฉพาะครูและผู้ดูแลระบบเท่านั้น', 'error');
             }
         }
 
@@ -497,9 +397,19 @@
         }
 
         // --- D) Reset To Login (Updated) ---
-        function resetToLogin() {
+        async function resetToLogin() {
             // [CHANGE] ใช้ clearSession แทน localStorage.removeItem
             clearSession();
+
+            // Clear the provider session as well as the app session. Otherwise
+            // Firebase can keep the previous Google identity authenticated
+            // after logout, which makes a later write/read look like a stale
+            // staff session even though the UI returned to the login screen.
+            try {
+                if (window.firebase && firebase.auth && firebase.auth().currentUser) await firebase.auth().signOut();
+            } catch (error) {
+                console.warn('Firebase sign-out failed during logout', error);
+            }
             
             CURRENT_USER = null;
             window.__AUTH_READY_STATE = 'missing';
@@ -511,16 +421,8 @@
             const adminContainer = document.getElementById('container-admin');
             if(adminContainer) adminContainer.classList.add('hidden');
             
-            const studentContainer = document.getElementById('container-student');
-            if(studentContainer) studentContainer.classList.add('hidden');
-
             const loginPage = document.getElementById('page-login');
             if(loginPage) loginPage.classList.remove('hidden');
-
-            const userEl = document.getElementById('login-user');
-            const passEl = document.getElementById('login-pass');
-            if(userEl) userEl.value = '';
-            if(passEl) passEl.value = '';
 
             setLoading(false);
         }

@@ -1,9 +1,4 @@
 {
-  "scripts": {
-    "check": "node scripts/repository-safety-check.js && node --check firebase-bridge.js && node --check supabase-auth-client.js && node --check supabase-score-client.js",
-    "build": "node build-github-pages.js",
-    "predeploy": "npm run check && npm run build && git diff --check"
-  },
   "dependencies": {
     "xlsx": "^0.18.5"
   }

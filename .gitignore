@@ -1,8 +1,15 @@
 # Local backups and scratch artifacts
 scratch/
 _BACKUP_*
+BACKUP_*
 *.sha256
+*.zip
 .DS_Store
+
+# Generated/runtime directories and logs
+node_modules/
+.firebase/
+firebase-debug.log
 
 # Local data exports / personal workbooks
 *.xlsx
@@ -11,6 +18,8 @@ _BACKUP_*
 # Local editor and OS metadata
 .vscode/
 .idea/
-.tools/
-supabase/.temp/
-node_modules/
+
+# Local credentials
+.env
+.env.*
+!.env.example

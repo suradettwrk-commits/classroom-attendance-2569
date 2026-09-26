@@ -28,10 +28,6 @@
   // Writes must fail back to the durable local queue instead of leaving the
   // UI in a permanent "saving" state when Firebase never completes a request.
   const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
-  const ADMIN_EMAILS = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-  function isAdminEmail(email) {
-    return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
-  }
 
   function readTerms() {
     // All realtime and one-shot reads must wait for Firebase Auth restoration.
@@ -206,8 +202,7 @@
     if (!snapshotPromise) snapshotPromise = ready().then((currentUser) => {
       const publicPaths = ['students', 'subjects', 'assignments', 'attendance', 'scores', 'terms', 'teacherClasses', 'classScopes', 'attendanceAssistants'];
       const adminPaths = ['config', 'systemSettings', 'settings', 'users', 'auditLog'];
-      const isCurrentAdmin = isAdminEmail(currentUser && currentUser.email) || isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email);
-      const paths = isCurrentAdmin ? publicPaths.concat(adminPaths) : publicPaths;
+      const paths = String(currentUser && currentUser.email || '').toLowerCase() === 'suradet.t@wrk.ac.th' ? publicPaths.concat(adminPaths) : publicPaths;
       // Optional/admin-only nodes must not make the whole public dataset
       // fail. A denied /users or /settings read should degrade that node to
       // an empty object while students, classes and records still load.
@@ -713,15 +708,13 @@
   function resultError(message) { return { success: false, message }; }
   async function adminOnly() {
     await ready();
-    const currentEmail = String(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email || auth.currentUser && auth.currentUser.email || '').trim().toLowerCase();
-    if (!isAdminEmail(currentEmail)) throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ');
+    if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
   async function teacherOrAdmin(payload) {
     await ready();
-    const identityUser = window.__SUPABASE_AUTH_USER || auth.currentUser;
-    const identityEmail = String(identityUser && identityUser.email || '').toLowerCase();
-    if (isAdminEmail(identityEmail)) return { admin: true, teacherId: 'admin' };
     const firebaseUser = auth.currentUser;
+    const firebaseEmail = String(firebaseUser && firebaseUser.email || '').toLowerCase();
+    if (firebaseEmail === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin' };
     if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
@@ -844,13 +837,20 @@
     if (name === 'getCurrentUserProfile') {
       await ready();
       const id = text(args[0]);
-      const identity = window.__SUPABASE_AUTH_USER || auth.currentUser;
-      const email = String(identity?.email || '').trim().toLowerCase();
+      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
       let record = null;
-      if (isAdminEmail(email)) {
-        record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;
-        if (!record && isAdminEmail(email)) {
-          record = { UserID: 'admin', Username: email, Name: 'สุรเดช ธรรมประโชติ', Role: 'admin', Email: email, Status: 'Active' };
+      if (window.__SUPABASE_MODE__) {
+        const root = await data();
+        const users = values('users', root);
+        record = users.find((row) => text(row.UserID || row.userId || row.user_id) === id || text(row.Email || row.email).toLowerCase() === email) || null;
+        if (email === 'suradet.t@wrk.ac.th' && id === 'admin') record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
+      }
+      if (email === 'suradet.t@wrk.ac.th') {
+        if (id === 'admin') {
+          record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        } else {
+          record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;
         }
       } else if (email) {
         const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
@@ -859,24 +859,18 @@
       }
       return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
     }
-    // Login only needs one student lookup plus the small users node. Do not
-    // download attendance, scores, or every other collection just to verify
-    // credentials; that old broad read made the app feel like a slow Sheet.
+    // Staff access is Google-only. Student credentials are intentionally not
+    // accepted by this application; student records remain data used by staff.
     if (name === 'loginSystem') {
       await ready();
       const login = text(args[0]);
       const password = text(args[1]);
-      const studentSnapshot = await db.ref('/students').orderByChild('StudentID').equalTo(login).once('value');
-      const studentRecord = Object.values(rawMap(studentSnapshot.val())).find((row) => text(row.StudentID) === login);
-      if (studentRecord && password === `wrk${login}` && text(studentRecord.Status).toLowerCase() !== 'inactive') {
-        return { success: true, user: { ...student(studentRecord), role: 'student', username: login } };
-      }
       const usersSnapshot = await db.ref('/users').once('value');
       const loginId = loginKey(login);
       const configured = Object.values(rawMap(usersSnapshot.val())).find((row) => {
         const identities = [row.Username, row.username, row.Email, row.email, row.UserID, row.userId, row.Name, row.name].map(loginKey).filter(Boolean);
         const identityMatches = identities.some((value) => value === loginId || (loginId.length >= 3 && value.includes(loginId)));
-        return identityMatches && text(row.Password || row.password) === password && text(row.Status || row.status).toLowerCase() !== 'inactive' && ['admin', 'teacher', 'attendance_assistant'].includes(text(row.Role || row.role).toLowerCase());
+        return identityMatches && text(row.Password || row.password) === password && text(row.Status || row.status).toLowerCase() !== 'inactive' && ['admin', 'teacher'].includes(text(row.Role || row.role).toLowerCase());
       });
       return configured ? { success: true, user: user(configured) } : resultError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     }
@@ -903,7 +897,7 @@
     if (name === 'submitTeacherAccessRequest') {
       const current = await ready();
       if (!current || !current.email) throw new Error('กรุณาเข้าสู่ระบบด้วย Google ก่อน');
-      if (isAdminEmail(current.email) || isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email)) throw new Error('บัญชีผู้ดูแลระบบไม่ต้องส่งคำขอ');
+      if (String(current.email).toLowerCase() === 'suradet.t@wrk.ac.th') throw new Error('บัญชีผู้ดูแลระบบไม่ต้องส่งคำขอ');
       const subjectCode = text(arg.subjectCode), level = text(arg.level), room = text(arg.room);
       if (!subjectCode || !level || !room) throw new Error('กรุณาระบุวิชา ระดับชั้น และห้อง');
       const classes = values('teacherClasses', root); const validCombo = classes.some((r) => text(r.SubjectCode || r.subjectCode) === subjectCode && text(r.Level || r.level) === level && text(r.Room || r.room) === room && text(r.Status || r.status).toLowerCase() !== 'inactive');
@@ -934,7 +928,7 @@
     if (name === 'getStudents' || name === 'getStudentsByFilter') {
       const p = arg || {};
       const filtered = values('students', root).map((r) => student(r, root)).filter((s) => {
-        const termOk = !p.term || termLabel(s) === text(p.term) || text(s.term) === text(p.term);
+        const termOk = !p.term || matchesTerm(s.term, p.term, root);
         const levelOk = !p.level || text(s.level) === text(p.level);
         const roomOk = !p.room || text(s.room) === text(p.room);
         const q = text(p.q || p.search).toLowerCase();
@@ -1084,8 +1078,13 @@
       const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
       const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
       const assignmentIds = new Set(assignments.map((a) => a.id)); const studentIds = new Set(students.map((s) => s.id)); const scores = {};
-      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && assignmentIds.has(text(r.AssignmentID)) && studentIds.has(text(r.StudentID))).forEach((r) => { scores[`${text(r.AssignmentID)}_${text(r.StudentID)}`] = score(r); });
-      return { success: true, data: { term: selected, students, assignments, scores } };
+      const orphanScores = [];
+      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
+        const assignmentId = text(r.AssignmentID || r.assignmentId);
+        if (assignmentIds.has(assignmentId)) scores[`${assignmentId}_${text(r.StudentID)}`] = score(r);
+        else orphanScores.push({ scoreId: text(r.ScoreID || r.scoreId), assignmentId, studentId: text(r.StudentID || r.studentId), subjectCode: text(r.SubjectCode || r.subjectCode), term: text(r.TermID || r.Term || r.term), score: r.Score ?? r.score ?? '', isSubmitted: r.IsSubmitted ?? r.isSubmitted ?? '' });
+      });
+      return { success: true, data: { term: selected, students, assignments, scores, orphanScores } };
     }
     if (name === 'getAttendanceAssistants') return { success: true, data: values('attendanceAssistants', root).map(assistant) };
     if (name === 'getTeacherClasses') return { success: true, data: values('teacherClasses', root).map((r) => teacherClass(r, root)) };
@@ -1098,7 +1097,7 @@
       return { success: true, value, folderId: value };
     }
     if (name === 'getAdminSettingsBootstrap') {
-      const isAdmin = isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email) || isAdminEmail(auth.currentUser && auth.currentUser.email);
+      const isAdmin = String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() === 'suradet.t@wrk.ac.th';
       const term = activeTerm(root, text(arg.term));
       const scoped = initial(root, term, arg.user).data;
       const settings = {};
@@ -1173,7 +1172,10 @@
         const rawId = text(record.recordId || record.RecordID || `${date}_${studentId}_${subjectCode}`);
         updates[`attendance/${firebaseKey(rawId)}`] = withoutUndefined({
           RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
-          Status: text(record.status || record.Status) || 'มา', Note: text(record.note || record.Note), Recorder: text(p.recorder || p.Recorder), Timestamp: new Date().toISOString()
+          Status: Object.prototype.hasOwnProperty.call(record || {}, 'status') || Object.prototype.hasOwnProperty.call(record || {}, 'Status')
+            ? text(record.status !== undefined ? record.status : record.Status)
+            : 'มา',
+          Note: text(record.note || record.Note), Recorder: text(p.recorder || p.Recorder), Timestamp: new Date().toISOString()
         });
       });
       await db.ref('/').update(updates); snapshotPromise = null;
@@ -1222,7 +1224,7 @@
       const key = recordKey('saveStudent', arg || {});
       const requestedStatus = text(arg && (arg.status || arg.Status));
       if (!key) return resultError('ไม่พบรหัสนักเรียน');
-      if (!['Active', 'Inactive', 'ลาออกแล้ว'].includes(requestedStatus)) return resultError('สถานะนักเรียนไม่ถูกต้อง');
+      if (!['Active', 'Inactive', 'ลาออกแล้ว', 'พักการเรียน'].includes(requestedStatus)) return resultError('สถานะนักเรียนไม่ถูกต้อง');
       const current = (await db.ref(`students/${firebaseKey(key)}`).once('value')).val() || {};
       const scope = authz.teacherClass || {};
       const teacherClassId = text(current.TeacherClassID || current.teacherClassId || scope.TeacherClassID || scope.teacherClassId);
@@ -1420,9 +1422,9 @@
     snapshotPromise = null;
     authReadyPromise = Promise.resolve(result.user);
     const email = String(result.user.email || '').trim().toLowerCase();
-    if (isAdminEmail(email)) return { success: true, user: { id: 'admin', username: email, name: result.user.displayName || 'สุรเดช ธรรมประโชติ', role: 'admin', email, imageUrl: result.user.photoURL || '' } };
+    if (email === 'suradet.t@wrk.ac.th') return { success: true, user: { id: 'admin', username: email, name: result.user.displayName || 'สุรเดช ธรรมประโชติ', role: 'admin', email, imageUrl: result.user.photoURL || '' } };
     const profile = (await db.ref(`authProfiles/${firebaseKey(result.user.uid)}`).once('value')).val();
-    if (profile && profile.UserID) return { success: true, user: user(profile) };
+    if (profile && profile.UserID && ['admin', 'teacher'].includes(text(profile.Role || profile.role).toLowerCase()) && text(profile.Status || profile.status).toLowerCase() !== 'inactive') return { success: true, user: user(profile) };
     const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
     const indexed = Object.values(indexedRoot)[0];
     if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {

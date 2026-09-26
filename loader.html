@@ -162,7 +162,18 @@ class DataController {
 
     rowTermMatches(rowTerm, targetTerm) {
         const target = this.normalizeTermValue(targetTerm, '');
-        const row = this.normalizeTermValue(rowTerm, '');
+        const rawRow = String(rowTerm == null ? '' : rowTerm).trim();
+        const termRows = Array.isArray(this.db && this.db.terms)
+            ? this.db.terms
+            : Object.values((this.db && this.db.terms) || {});
+        const mapped = termRows.find((record) => {
+            const termId = String(record && (record.TermID || record.termId || '')).trim();
+            const label = `${String(record && (record.TermNo || record.termNo || '')).trim()}/${String(record && (record.AcademicYear || record.academicYear || '')).trim()}`;
+            return rawRow && (rawRow === termId || rawRow === label);
+        });
+        const row = mapped
+            ? this.normalizeTermValue(`${mapped.TermNo || mapped.termNo}/${mapped.AcademicYear || mapped.academicYear}`, '')
+            : this.normalizeTermValue(rawRow, '');
         if (!target) return true;
         if (!row) return true;
         return row === target;
@@ -466,7 +477,9 @@ class DataController {
         const key = `${normalizedTerm}_${date}_${subject}_${studentId}`;
         
         this.db.attendance[key] = {
-            status: status || (this.db.attendance[key] ? this.db.attendance[key].status : 'มา'),
+            status: status !== undefined && status !== null
+                ? status
+                : (this.db.attendance[key] ? this.db.attendance[key].status : 'มา'),
             note: note !== undefined ? note : (this.db.attendance[key] ? this.db.attendance[key].note : ''),
             recorder: (window.CURRENT_USER ? window.CURRENT_USER.name : 'Me') + ' (Local)',
             timestamp: new Date().toISOString()
