@@ -2948,7 +2948,14 @@ var DATA_CONTROLLER = new DataController();
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                 <label class="text-xs font-bold text-slate-500">ภาคเรียน<select id="grading-term" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"></select></label>
-                <label class="text-xs font-bold text-slate-500">รายวิชา<select id="grading-subject" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"></select></label>
+                <label class="text-xs font-bold text-slate-500">รายวิชา<select id="grading-subject" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                    <option value="I20201">I20201 (IS) การศึกษาค้นคว้าและสร้างองค์ความรู้</option>
+                    <option value="ส21233">ส21233 ต้านทุจริตศึกษา</option>
+                    <option value="ส22101">ส22101 สังคมศึกษาฯ (พระพุทธ-หน้าที่)</option>
+                    <option value="ส22102">ส22102 ประวัติศาสตร์</option>
+                    <option value="ส22235">ส22235 ต้านทุจริตศึกษา</option>
+                    <option value="ส30101">ส30101 ศาสนาสากล</option>
+                </select></label>
                 <label class="text-xs font-bold text-slate-500">ระดับชั้น<select id="grading-level" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"></select></label>
                 <label class="text-xs font-bold text-slate-500">ห้อง<select id="grading-room" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"></select></label>
                 <div class="grid grid-cols-2 gap-2 text-xs font-bold text-slate-500"><label>ก่อนกลางภาค<input id="grading-w-pre" type="number" min="0" max="100" class="mt-1 w-full border border-slate-200 rounded-xl px-2 py-2" value="20"></label><label>กลางภาค<input id="grading-w-mid" type="number" min="0" max="100" class="mt-1 w-full border border-slate-200 rounded-xl px-2 py-2" value="20"></label><label>หลังกลางภาค<input id="grading-w-post" type="number" min="0" max="100" class="mt-1 w-full border border-slate-200 rounded-xl px-2 py-2" value="20"></label><label>ปลายภาค<input id="grading-w-final" type="number" min="0" max="100" class="mt-1 w-full border border-slate-200 rounded-xl px-2 py-2" value="40"></label></div>
@@ -4586,6 +4593,7 @@ var DATA_CONTROLLER = new DataController();
         // teacherClasses instead of the derived combos, so derive them here.
         const classRows = data.teacherClasses || (data.data && data.data.teacherClasses) || [];
         window.CLASS_COMBOS = (data.combos && data.combos.length ? data.combos : classRows.map(x => ({ subject: x.subjectCode, level: x.level, room: x.room }))).filter(x => x && x.subject && x.level && x.room);
+        enforceTeacherGradingSubjectScope();
         
         let term = window.CURRENT_SERVER_TERM;
         let localStudents = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db.students || [] : [];
@@ -8433,6 +8441,18 @@ var DATA_CONTROLLER = new DataController();
         ];
     }
     window.getSubjectCatalogFallback = getSubjectCatalogFallback;
+
+    function enforceTeacherGradingSubjectScope() {
+        const select = getEl('grading-subject');
+        const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+        if (!select || role !== 'teacher') return;
+        const allowed = new Set((window.CLASS_COMBOS || []).map(x => String(x.subject || '').trim()).filter(Boolean));
+        if (!allowed.size) { select.innerHTML = ''; return; }
+        [...select.options].forEach(option => { option.hidden = !allowed.has(String(option.value).trim()); });
+        const firstAllowed = [...select.options].find(option => allowed.has(String(option.value).trim()));
+        if (firstAllowed) select.value = firstAllowed.value;
+    }
+    window.enforceTeacherGradingSubjectScope = enforceTeacherGradingSubjectScope;
 
     function applyAdminSettingsBootstrap(data, forceRender) {
         if (!data || !data.success) return false;
