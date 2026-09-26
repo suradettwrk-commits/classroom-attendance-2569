@@ -62,7 +62,27 @@
     } catch (error) {}
     return text(new URL(window.location.href).searchParams.get('term'));
   }
-  async function readAllRows(name) {
+  function sameTerm(a, b) {
+    return text(a) === text(b) || text(a).replace(/\s+/g, '') === text(b).replace(/\s+/g, '');
+  }
+  function termFilterCandidates(termRows, requestedTerm) {
+    const requested = text(requestedTerm);
+    if (!requested) return [];
+    const candidates = new Set([requested]);
+    (termRows || []).forEach(row => {
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      const termId = text(row && (row.term_id || row.termId || row.TermID));
+      const labels = [
+        row && (row.display_label || row.term || row.Term),
+        row && `${row.term_no || row.termNo || row.TermNo || ''}/${row.academic_year || row.academicYear || row.AcademicYear || ''}`,
+        legacy.display_label || legacy.term || legacy.Term,
+        `${legacy.term_no || legacy.termNo || legacy.TermNo || ''}/${legacy.academic_year || legacy.academicYear || legacy.AcademicYear || ''}`
+      ].map(text).filter(Boolean);
+      if (termId && labels.some(label => sameTerm(label, requested))) candidates.add(termId);
+    });
+    return [...candidates];
+  }
+  async function readAllRows(name, termCandidates) {
     const rows = [];
     const pageSize = 1000;
     // These tables grow with every lesson and score entry. Reading the whole
@@ -72,9 +92,11 @@
     // that term. This is read-only and does not alter stored data.
     const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
     const term = termScoped ? activeTermHint() : '';
+    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [];
     for (let offset = 0; ; offset += pageSize) {
       let query = client.from(tableName(name)).select('*');
-      if (term) query = query.eq('term_id', term);
+      if (terms.length > 1) query = query.in('term_id', terms);
+      else if (terms.length === 1) query = query.eq('term_id', terms[0]);
       const { data, error } = await query.range(offset, offset + pageSize - 1);
       if (error) return { data: null, error };
       const page = data || [];
@@ -109,8 +131,21 @@
   async function loadRoot(force) {
     if (!force && rootPromise) return rootPromise;
     rootPromise = (async () => {
-      const entries = await Promise.all(tableNames.map(async name => {
-        const { data, error } = await readAllRows(name);
+      // Resolve the display term to every canonical term_id used by the
+      // migrated rows before reading the large activity tables. The live UI
+      // uses labels such as 1/2569, while older Supabase rows can reference
+      // the timestamp-shaped term primary key. Both belong to one active
+      // term and must be read together without scanning all history.
+      const termResult = await readAllRows('terms');
+      const termCandidates = termResult.error ? [] : termFilterCandidates(termResult.data || [], activeTermHint());
+      const entries = [
+        ['terms', termResult],
+        ...(await Promise.all(tableNames.filter(name => name !== 'terms').map(async name => {
+          const { data, error } = await readAllRows(name, termCandidates);
+          return [name, { data, error }];
+        })))
+      ].map(async ([name, result]) => {
+        const { data, error } = result;
         // A denied/optional table must not hide the core classroom data.
         // Keep that table empty and let students, classes and records load.
         if (error) {
@@ -120,8 +155,8 @@
         const map = {};
         (data || []).forEach(row => { const key = keyOf(row, name); if (key) map[key] = legacyRow(name, row); });
         return [name, map];
-      }));
-      const root = Object.fromEntries(entries);
+      });
+      const root = Object.fromEntries(await Promise.all(entries));
       root.systemSettings = {};
       (root.settings && Object.values(root.settings) || []).forEach(row => { const key = text(row.setting_key || row.Key || row.key); if (key) root.systemSettings[key] = { Key: key, Value: row.value ?? row.Value ?? '' }; });
       rootCache = root;
