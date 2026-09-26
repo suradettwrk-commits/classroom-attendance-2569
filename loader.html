@@ -401,7 +401,11 @@ class DataController {
      * @param {Object} filter { date: "2024-06-01", subject: "ส21101", ... }
      */
     getAttendance(filter) {
-        if (!this.db || !this.db.attendance) return { success: false, message: 'กำลังโหลดข้อมูล...' };
+        // An attendance map without the current roster is not a usable local
+        // result. Return a miss so the scoped repository/server path can
+        // provide the class roster immediately instead of retrying an empty
+        // response several times.
+        if (!this.db || !this.db.attendance || !Array.isArray(this.db.students) || !this.db.students.length) return { success: false, message: 'กำลังโหลดรายชื่อนักเรียน...' };
 
         // 1. ดึงรายชื่อนักเรียนในห้องนั้นมาก่อน
         const term = this.normalizeTermValue(filter.term || (this.db.meta ? this.db.meta.term : ''), this.term);

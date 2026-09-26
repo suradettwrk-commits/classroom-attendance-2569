@@ -66,7 +66,8 @@
     return text(a) === text(b) || text(a).replace(/\s+/g, '') === text(b).replace(/\s+/g, '');
   }
   function termFilterCandidates(termRows, requestedTerm) {
-    const requested = text(requestedTerm);
+    const active = (termRows || []).find(row => text(row && (row.status || row.Status)).toLowerCase() === 'active') || (termRows || [])[0];
+    const requested = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
     if (!requested) return [];
     const candidates = new Set([requested]);
     (termRows || []).forEach(row => {
@@ -168,7 +169,9 @@
     const raw = text(value);
     const terms = rootCache && Object.values(rootCache.terms || {}) || [];
     const found = terms.find(row => raw === text(row.TermID || row.term_id || row.termId) || raw === `${text(row.TermNo || row.term_no)}/${text(row.AcademicYear || row.academic_year)}` || raw === text(row.display_label));
-    return found ? text(found.TermID || found.term_id || found.termId) : raw;
+    // Keep the stored term primary key as the only database identity. Labels
+    // such as 1/2569 are for display and must not be written as a second key.
+    return found ? text(found.term_id || found.TermID || found.termId) : raw;
   }
   function pathParts(path) { return String(path || '').split('/').filter(Boolean); }
   async function persist(name, key, value) {

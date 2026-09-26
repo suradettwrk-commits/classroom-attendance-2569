@@ -113,6 +113,19 @@
     .content-tab > .bg-white { border-color: #e1e7ff !important; box-shadow: 0 10px 28px rgba(71, 85, 105, .07) !important; }
     .content-tab input:focus, .content-tab select:focus, .content-tab textarea:focus { border-color: #818cf8 !important; box-shadow: 0 0 0 4px rgba(129, 140, 248, .16) !important; }
     #sync-status { border-color: #bae6fd !important; background: linear-gradient(90deg, #ecfeff, #eef2ff) !important; }
+
+    /* Attendance status controls must not depend on runtime-generated Tailwind
+       class names. The status buttons are injected after page load, so keep
+       their selected colors in ordinary CSS that is always available. */
+    .attendance-status-option { color: #94a3b8; background: transparent; }
+    .attendance-status-option:hover { background: #e2e8f0; }
+    .attendance-status-option.attendance-status-selected { color: #fff !important; }
+    .attendance-status-option.attendance-status-green { background: #22c55e !important; }
+    .attendance-status-option.attendance-status-yellow { background: #facc15 !important; color: #713f12 !important; }
+    .attendance-status-option.attendance-status-blue { background: #60a5fa !important; }
+    .attendance-status-option.attendance-status-red { background: #ef4444 !important; }
+    .attendance-status-option[aria-disabled="true"] { background: #e2e8f0 !important; color: #94a3b8 !important; }
+
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div { position: relative; overflow: hidden; border: 0 !important; color: #fff; box-shadow: 0 12px 24px rgba(30, 41, 59, .10) !important; }
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div::after { content: ''; position: absolute; width: 110px; height: 110px; right: -35px; top: -45px; border-radius: 999px; background: rgba(255,255,255,.16); }
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div:nth-child(1) { background: linear-gradient(135deg, #6366f1, #8b5cf6) !important; }
@@ -1346,17 +1359,11 @@
             if (nextKey === this.storageKey) return;
             this.storageKey = nextKey;
             this.queue = LocalStore.get(this.storageKey) || [];
-            // Auth can restore after a score was queued. Reuse the anonymous
-            // queue for the now-verified account, while retaining the old key
-            // as a recovery copy in case the browser is switched back.
-            if (!this.queue.length && nextKey !== 'sync_queue_anonymous') {
-                const anonymousQueue = LocalStore.get('sync_queue_anonymous') || [];
-                if (anonymousQueue.length) {
-                    this.queue = anonymousQueue;
-                    this.save();
-                    console.warn('SYNC_ENGINE: adopted anonymous queue for verified account', nextKey, anonymousQueue.length);
-                }
-            }
+            // Never adopt an anonymous queue into a verified account. The
+            // anonymous namespace may belong to another person using this
+            // browser, and replaying it could write data under the wrong
+            // teacher. Anonymous work remains isolated until the user
+            // explicitly reviews or clears it from this device.
             this.purgeStaleQueue();
             this.updateUI(this.queue.length ? 'pending' : 'synced');
             console.log('SYNC_ENGINE: switched isolated queue to', this.storageKey);
@@ -2172,7 +2179,7 @@
             const gradingSubject = getEl('grading-subject');
             if (gradingSubject) {
                 const selected = gradingSubject.value;
-                gradingSubject.innerHTML = subjects.map(s => `<option value="${esc(s.code)}">${esc(getSubjectDisplayLabel(s))}</option>`).join('');
+                gradingSubject.innerHTML = subjects.map(s => `<option value="${gradingEsc(s.code)}">${gradingEsc(getSubjectDisplayLabel(s))}</option>`).join('');
                 if (subjects.some(s => s.code === selected)) gradingSubject.value = selected;
             }
             if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
@@ -2832,6 +2839,15 @@
                 // The grading tab shares the main system's Firebase/bootstrap data.
                 // Wait for that bootstrap on a fresh browser session so filters are
                 // never rendered empty just because the tab was opened first.
+                const hydrateGradingFilters = (attempt = 0) => {
+                    const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : null;
+                    if (liveDb) populateSelects({ term: liveDb.meta && liveDb.meta.term, subjects: liveDb.subjects || [], levels: liveDb.levels || [], rooms: liveDb.rooms || [], combos: liveDb.combos || [], teacherClasses: liveDb.teacherClasses || [], studentsLite: liveDb.students || [] });
+                    if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
+                    const levelReady = !!getEl('grading-level')?.options.length;
+                    const roomReady = !!getEl('grading-room')?.options.length;
+                    if ((!levelReady || !roomReady) && attempt < 20) return setTimeout(() => hydrateGradingFilters(attempt + 1), 300);
+                    loadNativeGradingData();
+                };
                 const waitForSharedData = (startedAt = Date.now()) => {
                     const rows = value => Array.isArray(value) ? value : Object.values(value || {});
                     const liveSubjects = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? rows(DATA_CONTROLLER.db.subjects).length : 0;
@@ -2843,16 +2859,15 @@
                         // an empty cached bootstrap must never hide real subjects.
                         loadAdminSettingsBootstrap(true, () => {
                             const subjectSelect = getEl('grading-subject');
-                            if (subjectSelect && subjectSelect.options.length > 0) return loadNativeGradingData();
+                            if (subjectSelect && subjectSelect.options.length > 0) return hydrateGradingFilters();
                             // Some teacher profiles receive the class scope before
                             // the subject catalog. Read the catalog separately,
                             // still applying the same scope in populateNativeGradingFilters.
                             google.script.run.withSuccessHandler(result => {
                                 const rows = result && result.success ? (result.data || []) : [];
                                 if (rows.length) window.SUBJECTS_CACHE = rows.map(normalizeSubjectRecord).filter(s => s.code);
-                                populateNativeGradingFilters();
-                                loadNativeGradingData();
-                            }).withFailureHandler(() => loadNativeGradingData()).getSubjects();
+                                hydrateGradingFilters();
+                            }).withFailureHandler(() => hydrateGradingFilters()).getSubjects();
                         });
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
@@ -4020,6 +4035,7 @@
         };
         return { fetchData, openAddModal, openEditModal, openCopyAssignmentsModal, refreshCopySourceAssignments, toggleCopySelection, copySelectedAssignments, handleSaveAssignment, handleDeleteAssignment, updateLocalScore, handlePaste, moveAssignment, saveAll, saveDirty, _clearDirtyKeys, _markScoreSynced, _onScoreSyncSuccess, print, downloadImage, downloadExcel, exportExcel, exportToSheet, highlightRow, toggleExportScoreVisibility };
     })();
+    window.SCORES_MANAGER = SCORES_MANAGER;
 
     function canManageAttendanceAssistant() {
         const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
@@ -4435,11 +4451,11 @@
                 let buttonsHtml = `<div class="inline-flex bg-slate-100 p-1 rounded-lg w-full max-w-[280px]">`;
                 statusOptions.forEach(opt => {
                     const isChecked = (status === opt.val) ? 'checked' : '';
-                    let bgClass = `peer-checked:bg-${opt.color}-500`; if(opt.color === 'yellow') bgClass = `peer-checked:bg-yellow-400`;
-                    const selectedClass = '';
-                    const selectedStyle = '';
-                    // Add onclick handler for auto-sync (fires even if already selected)
-                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
+                    const selectedClass = status === opt.val ? `attendance-status-selected attendance-status-${opt.color}` : '';
+                    // The selected class is explicit because these controls are
+                    // rendered dynamically and cannot rely on Tailwind's
+                    // compile-time class extraction.
+                    buttonsHtml += `<button type="button" class="flex-1 relative border-0 p-0 bg-transparent ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" data-attendance-id="${s.id}" data-attendance-status="${opt.val}" ${inactive ? 'disabled title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : ''}><span class="attendance-status-option ${selectedClass} block py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 z-0" aria-disabled="${inactive ? 'true' : 'false'}">${opt.label}</span></button>`;
                 });
                 buttonsHtml += `</div>`;
 
@@ -4460,6 +4476,10 @@
                 html += `<tr class="${inactive ? 'bg-slate-100 text-slate-500' : 'hover:bg-slate-50'} border-b transition-colors ${pending ? 'bg-orange-50/30' : ''}"><td class="p-4 text-slate-500">${s.no}</td><td class="p-4 text-xs font-mono text-slate-400">${s.id}</td><td class="p-4 font-bold">${studentName}${inactiveBadge}</td><td class="p-4 text-center">${buttonsHtml}</td><td class="p-4"><input class="att-note w-full text-xs p-2 border border-transparent hover:border-slate-200 rounded-lg focus:border-school-primary focus:bg-white bg-transparent outline-none transition" value="${s.attNote||''}" placeholder="หมายเหตุ..." ${inactive ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ไขได้"' : `oninput="ATTENDANCE_MANAGER.updateNote('${s.id}', this.value)"`}></td><td id="att-info-${s.id}" class="p-4 border-l border-slate-50">${infoHtml}</td></tr>`;
             });
             els.tbody.innerHTML = html;
+            els.tbody.querySelectorAll('[data-attendance-id][data-attendance-status]').forEach(label => {
+                if (label.disabled) return;
+                label.addEventListener('click', () => updateStatus(label.dataset.attendanceId, label.dataset.attendanceStatus));
+            });
         };
 
         const updateStatus = (id, newStatus) => {
@@ -4472,15 +4492,16 @@
             }
             // 1. Optimistic Update State
             const student = state.students.find(s => s.id == id);
-            if (student && student.isChecked && String(student.attStatus || 'มา') === String(newStatus || 'มา')) {
-                console.log('ATTENDANCE queueSync skipped unchanged saved status', id, newStatus);
-                return;
-            }
+            // Clicking the selected status again deliberately clears it. This
+            // keeps the status buttons reversible instead of leaving a saved
+            // "มา" stuck on the row after the teacher changes their mind.
+            const currentStatus = student ? String(student.attStatus || '') : '';
+            const nextStatus = student && student.isChecked && currentStatus === String(newStatus || '') ? '' : String(newStatus || '');
             if(student) {
-                student.attStatus = newStatus;
+                student.attStatus = nextStatus;
                 student.attRecorder = CURRENT_USER ? CURRENT_USER.name : 'Me';
                 student.attTime = new Date().toISOString();
-                student.isChecked = true;
+                student.isChecked = !!nextStatus;
                 
                 // Manual DOM update for the info cell to avoid full re-render
                 const infoEl = getEl(`att-info-${id}`);
@@ -4492,13 +4513,17 @@
 
                 // [NEW] Update DATA_CONTROLLER cache immediately
                 if (typeof DATA_CONTROLLER !== 'undefined') {
-                    DATA_CONTROLLER.updateAttendanceRecord(state.filter.term, state.filter.date, state.filter.subject, id, newStatus, student.attNote);
+                    DATA_CONTROLLER.updateAttendanceRecord(state.filter.term, state.filter.date, state.filter.subject, id, nextStatus, student.attNote);
                 }
             }
-            
+
             // 2. Queue Sync
-            queueSync(id, newStatus, student ? student.attNote : undefined);
-            
+            queueSync(id, nextStatus, student ? student.attNote : undefined);
+
+            // Re-render the row controls so clicking an already-selected
+            // status visibly clears the radio selection as well as the data.
+            render();
+
             // 3. Update Cache (Scoped cache for current view)
             const cacheKey = getScopedCacheKey('ATTENDANCE', [state.filter.date, state.filter.subject, state.filter.level, state.filter.room]);
             LocalStore.set(cacheKey, state.students);
@@ -4833,6 +4858,10 @@
 
         return { load, render, updateStatus, updateNote, clearToday, markAllPresent, saveAll, state };
     })();
+    // Dynamic inline handlers in the legacy UI resolve managers from window.
+    // Keep the local const for internal code, but expose the same instance so
+    // attendance controls can update state when clicked.
+    window.ATTENDANCE_MANAGER = ATTENDANCE_MANAGER;
 
     window.onSyncSuccess = function(task) {
         if (task.type === 'SCORE') {
@@ -4855,12 +4884,14 @@
                 if (!rec) return;
                 var std = students.find(function(s) { return String(s.id) === String(rec.id); });
                 if (!std) return;
-                var infoEl = getEl('att-info-' + rec.id);
-                if (infoEl) {
-                    infoEl.innerHTML = '<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">' + (std.attRecorder || '') + '</span></div><div class="text-[10px] text-green-500 mt-1 leading-tight"><i class="fa-solid fa-circle-check"></i> ' + timeStr + '</div></div>';
-                    var rowEl = infoEl.closest('tr');
-                    if (rowEl) rowEl.classList.remove('bg-blue-50/30', 'bg-orange-50/30');
-                }
+                var savedStatus = String(rec.status !== undefined ? rec.status : (rec.Status || '')).trim();
+                std.attStatus = savedStatus;
+                std.isChecked = !!savedStatus;
+                std.attRecorder = savedStatus ? (std.attRecorder || (CURRENT_USER ? CURRENT_USER.name : 'Me')) : '';
+                std.attTime = savedStatus ? (std.attTime || new Date().toISOString()) : '';
+                // A blank status is a valid clear operation. Render from state
+                // so the UI cannot incorrectly report a green saved status.
+                ATTENDANCE_MANAGER.render();
             });
         }
     };
@@ -7440,10 +7471,19 @@
             ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
-        const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))].sort(naturalSort);
+        // On a cold production session the shared student snapshot can arrive
+        // after the grading tab is opened. Reuse the already hydrated scoped
+        // selectors as a short-lived fallback so the filters never remain
+        // blank while the realtime snapshot catches up.
+        const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
+        const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
+        const levelValues = [...new Set((subjectClasses.map(classLevel).filter(Boolean).length ? subjectClasses.map(classLevel).filter(Boolean) : scopedLevelOptions))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const roomValues = [...new Set(subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean))].sort(naturalSort);
+        const scopedRoomsForLevel = scopedRoomOptions;
+        const roomValues = [...new Set((subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean).length
+            ? subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean)
+            : scopedRoomsForLevel))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {

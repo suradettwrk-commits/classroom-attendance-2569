@@ -64,6 +64,10 @@
       });
       return authReadyPromise.then((user) => {
         if (user) return user;
+        // Supabase Auth is the only production identity provider. Never
+        // manufacture an anonymous Firebase identity here: it makes the UI
+        // appear logged in while every protected CRUD write is rejected.
+        if (window.__SUPABASE_MODE__) return null;
         let timer;
         const timeout = new Promise((_, reject) => {
           timer = setTimeout(() => {
@@ -109,7 +113,11 @@
     if (!root || !raw) return raw;
     const found = values('terms', root).find((t) => text(t.TermID) === raw || termLabel(t) === raw || `${text(t.TermNo)}/${text(t.AcademicYear)}` === raw);
     if (!found) return raw;
-    return text(found.CanonicalTermID || found.TermKey || `TERM_${text(found.AcademicYear)}_${text(found.TermNo)}`) || text(found.TermID);
+    // TermID is the persisted database key. The visible label (for example
+    // 1/2569) is only a presentation value and must never be replaced by a
+    // synthetic key such as TERM_2569_1. Older rows use a timestamp-shaped
+    // TermID, so every read/write path must resolve back to this exact value.
+    return text(found.TermID || found.term_id || found.CanonicalTermID || found.TermKey) || raw;
   }
   function classScopeKey(term, level, room, root) {
     const termId = canonicalTermId(term, root);
@@ -181,17 +189,23 @@
   }
   function teacherClasses(root) { return values('teacherClasses', root).map((row) => teacherClass(row, root)); }
   function assistant(row, root) { return { id: text(row.AssistantID), assistantId: text(row.AssistantID), studentId: text(row.AssistantStudentID || row.StudentID || row.studentId), subjectCode: text(row.SubjectCode || row.subjectCode), level: text(row.Level || row.level), room: text(row.Room || row.room), term: normalizedTerm(row.TermID || row.term || row.Term, root), status: text(row.Status || row.status), assignedBy: text(row.AssignedBy), updatedAt: row.UpdatedAt }; }
-  function findTeacherClass(root, teacherId, subjectCode, level, room, term, classId) {
-    const wantedTerm = canonicalTerm(term, root);
-    const wantedClassId = text(classId);
-    return values('teacherClasses', root).find((row) =>
+  function allowedScopeRows(root, identity, term, subjectCode) {
+    const role = text(identity && (identity.role || identity.Role)).toLowerCase();
+    const userId = text(identity && (identity.id || identity.userId || identity.UserID));
+    const wantedSubject = text(subjectCode);
+    return values('teacherClasses', root).filter((row) =>
       text(row.Status || row.status).toLowerCase() !== 'inactive' &&
-      text(row.TeacherID || row.teacherId) === text(teacherId) &&
-      text(row.SubjectCode || row.subjectCode || row.subject) === text(subjectCode) &&
+      matchesTerm(row.TermID || row.Term || row.term, term, root) &&
+      (role === 'admin' || text(row.TeacherID || row.teacherId) === userId) &&
+      (!wantedSubject || text(row.SubjectCode || row.subjectCode || row.subject) === wantedSubject)
+    );
+  }
+  function findTeacherClass(root, teacherId, subjectCode, level, room, term, classId) {
+    const wantedClassId = text(classId);
+    return allowedScopeRows(root, { id: teacherId, role: 'teacher' }, term, subjectCode).find((row) =>
       (!wantedClassId || text(row.ClassID || row.classId) === wantedClassId) &&
       text(row.Level || row.level) === text(level) &&
-      text(row.Room || row.room) === text(room) &&
-      matchesTerm(row.TermID || row.Term || row.term, wantedTerm, root)
+      text(row.Room || row.room) === text(room)
     ) || null;
   }
   function teacherClassKey(teacherId, subjectCode, level, room, term) {
@@ -691,9 +705,7 @@
     const termMatches = (value) => matchesTerm(value, selectedTerm, root);
     const role = text(currentUser && currentUser.role).toLowerCase();
     const allTeacherClasses = values('teacherClasses', root).filter((r) => termMatches(r.TermID || r.Term || r.term) && text(r.Status || r.status).toLowerCase() !== 'inactive');
-    const scopedTeacherClasses = role === 'admin'
-      ? allTeacherClasses
-      : allTeacherClasses.filter((r) => text(r.TeacherID || r.teacherId) === text(currentUser && currentUser.id));
+    const scopedTeacherClasses = allowedScopeRows(root, currentUser, selectedTerm);
     const allowedClasses = scopedTeacherClasses.map((r) => ({ subject: text(r.SubjectCode || r.subjectCode), level: text(r.Level || r.level), room: text(r.Room || r.room) })).filter((r) => r.subject && r.level && r.room);
     const isAllowedStudent = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room));
     const isAllowedAssignment = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room) && x.subject === text(r.SubjectCode || r.subjectCode));
@@ -710,6 +722,18 @@
     await ready();
     if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
+  async function staffProfileFromAuth(firebaseUser) {
+    const email = text(firebaseUser && firebaseUser.email).toLowerCase();
+    if (!email) return null;
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
+      const { data: row, error } = await window.__SUPABASE_CLIENT__.from('app_users').select('*').eq('email', email).maybeSingle();
+      if (error) throw error;
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      return { ...legacy, ...(row || {}) };
+    }
+    const indexedRoot = (await db.ref('authProfiles').once('value')).val() || {};
+    return Object.values(rawMap(indexedRoot)).find((row) => text(row.Email || row.email).toLowerCase() === email) || null;
+  }
   async function teacherOrAdmin(payload) {
     await ready();
     const firebaseUser = auth.currentUser;
@@ -718,11 +742,13 @@
     if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
-    const profile = (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
+    const profile = await staffProfileFromAuth(firebaseUser) || (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
-    return { admin: false, teacherId: text(profile.UserID || profile.id), firebaseUid: firebaseUser.uid };
+    const teacherId = text(profile.UserID || profile.userId || profile.user_id || profile.id || profile.legacy_user_id);
+    if (!teacherId) throw new Error('บัญชีครูยังไม่มีรหัสผู้ใช้ที่ผูกกับสิทธิ์การสอน');
+    return { admin: false, teacherId, firebaseUid: firebaseUser.uid };
   }
   async function teacherAssignmentOrAdmin(payload) {
     const authz = await teacherOrAdmin(payload);
@@ -952,7 +978,51 @@
       return { success: true, data: Object.values(usersRoot).map(user) };
     }
     if (name === 'getTerms') return { success: true, data: values('terms', root) };
-    if (name === 'getAttendance' || name === 'getAttendanceForCheck') return { success: true, data: values('attendance', root).map((r) => attendance(r, root)) };
+    if (name === 'getAttendance') return { success: true, data: values('attendance', root).map((r) => attendance(r, root)) };
+    if (name === 'getAttendanceForCheck') {
+      // The attendance screen needs the complete class roster even when the
+      // selected date has no saved attendance rows yet. Returning only the
+      // existing attendance records makes a valid empty day look like an
+      // empty class, so build the roster and merge the day's records here.
+      const p = arg || {};
+      const selectedTerm = activeTerm(root, p.term);
+      const identity = p.user || currentUser || {};
+      const role = text(identity && (identity.role || identity.Role)).toLowerCase();
+      const userId = text(identity && (identity.id || identity.userId || identity.UserID));
+      const subjectCode = text(p.subjectCode || p.subject);
+      const level = text(p.level);
+      const room = text(p.room);
+      const date = text(p.date).slice(0, 10);
+      const scopeRows = allowedScopeRows(root, identity, selectedTerm, subjectCode);
+      const allowed = role === 'admin' || scopeRows.some((row) =>
+        text(row.Level || row.level) === level && text(row.Room || row.room) === room
+      );
+      if (role !== 'admin' && !userId) return resultError('ไม่พบตัวตนครูสำหรับตรวจสอบสิทธิ์');
+      if (role !== 'admin' && !allowed) return resultError('ครูไม่มีสิทธิ์เช็คชั้น/ห้อง/วิชานี้');
+      const roster = values('students', root)
+        .filter((row) => matchesTerm(row.TermID || row.Term || row.term, selectedTerm, root))
+        .filter((row) => text(row.Level || row.level) === level && text(row.Room || row.room) === room)
+        .map((row) => student(row, root))
+        .sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0) || String(a.id).localeCompare(String(b.id), 'th'));
+      const dayRows = values('attendance', root)
+        .map((row) => attendance(row, root))
+        .filter((row) => matchesTerm(row.termId || row.term, selectedTerm, root))
+        .filter((row) => (!subjectCode || row.subjectCode === subjectCode) && (!level || row.level === level) && (!room || row.room === room) && (!date || String(row.date || '').slice(0, 10) === date));
+      const byStudent = new Map(dayRows.map((row) => [String(row.studentId), row]));
+      const students = roster.map((row) => {
+        const saved = byStudent.get(String(row.id));
+        const savedStatus = saved ? text(saved.status) : '';
+        return {
+          ...row,
+          attStatus: savedStatus,
+          attNote: saved ? saved.note : '',
+          attRecorder: savedStatus ? saved.recorder : '',
+          attTime: savedStatus ? saved.timestamp : '',
+          isChecked: !!savedStatus
+        };
+      });
+      return { success: true, students, count: dayRows.length, matched: students.length, term: selectedTerm };
+    }
     if (name === 'getStudentModeData') {
       const id = text(args[0]); const s = values('students', root).find((r) => text(r.StudentID) === id);
       return { success: true, data: { student: s ? student(s, root) : null, students: s ? [student(s, root)] : [], attendance: values('attendance', root).map((r) => attendance(r, root)).filter((r) => r.studentId === id), scores: values('scores', root).map(score).filter((r) => r.studentId === id), assignments: values('assignments', root).map((r) => assignment(r, root)), subjects: values('subjects', root).map(subject) } };
@@ -984,7 +1054,7 @@
           if (value === undefined || (value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100))) throw new Error(`คะแนน ${component} ของนักเรียน ${studentId} ต้องอยู่ระหว่าง 0 ถึง 100`);
           const key = gradeKey(term, subjectCode, studentId, component), expected = arg.baseRecords?.[studentId]?.[component], actual = currentScores[key]?.Score ?? '';
           if (expected !== undefined && text(actual) !== text(expected)) { conflicts.push({ studentId, component, expected, actual }); return; }
-          updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: value, IsSubmitted: value !== '' ? 1 : 0, Term: term, Timestamp: new Date().toISOString() };
+          updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: value, IsSubmitted: value !== '' ? 1 : 0, TermID: canonicalTermId(term, root), Term: term, Timestamp: new Date().toISOString() };
         });
       });
       if (conflicts.length) return { success: false, conflict: true, conflicts, message: `พบข้อมูลถูกแก้ไขจากอุปกรณ์อื่น ${conflicts.length} ช่อง จึงไม่เขียนทับข้อมูลเดิม` };
@@ -1018,7 +1088,7 @@
             const expected = arg.baseRecords?.[studentId]?.[component];
             const actual = currentScores[key]?.Score ?? '';
             if (expected !== undefined && text(actual) !== text(expected)) { conflicts.push({ studentId, component, expected, actual }); return; }
-            updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: scores[component], IsSubmitted: scores[component] !== '' ? 1 : 0, Term: term, Timestamp: new Date().toISOString() };
+            updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: scores[component], IsSubmitted: scores[component] !== '' ? 1 : 0, TermID: canonicalTermId(term, root), Term: term, Timestamp: new Date().toISOString() };
           }
         });
       });
@@ -1171,7 +1241,7 @@
         if (!studentId) throw new Error('ไม่พบรหัสนักเรียนในข้อมูลเช็คชื่อ');
         const rawId = text(record.recordId || record.RecordID || `${date}_${studentId}_${subjectCode}`);
         updates[`attendance/${firebaseKey(rawId)}`] = withoutUndefined({
-          RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
+          RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: canonicalTermId(term, root), Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
           Status: Object.prototype.hasOwnProperty.call(record || {}, 'status') || Object.prototype.hasOwnProperty.call(record || {}, 'Status')
             ? text(record.status !== undefined ? record.status : record.Status)
             : 'มา',
@@ -1205,7 +1275,7 @@
           StudentID: studentId,
           TeacherClassID: teacherClassId,
           ClassID: classId || undefined,
-          TermID: classId && termId ? termId : undefined,
+          TermID: canonicalTermId(term, root),
           SubjectCode: subjectCode,
           Level: level,
           Room: room,
@@ -1264,7 +1334,7 @@
            const classId = text(existing.ClassID || existing.classId || scope.ClassID || scope.classId);
            const termId = text(existing.TermID || existing.termId || scope.TermID || scope.termId);
            const legacyTeacherClassId = text(existing.TeacherClassID || existing.teacherClassId) || (classId && termId ? '' : text(scope.TeacherClassID || scope.teacherClassId || scope.id));
-           record = withoutUndefined({ ...existing, StudentID: key, TeacherClassID: legacyTeacherClassId || undefined, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Status: requestedStatus || text(existing.Status || existing.status) || 'Active' });
+           record = withoutUndefined({ ...existing, StudentID: key, TeacherClassID: legacyTeacherClassId || undefined, ClassID: classId || undefined, TermID: canonicalTermId(termId || arg.term, root), Status: requestedStatus || text(existing.Status || existing.status) || 'Active' });
          } else {
            record = withoutUndefined({
              ...existing,
@@ -1427,12 +1497,77 @@
     if (profile && profile.UserID && ['admin', 'teacher'].includes(text(profile.Role || profile.role).toLowerCase()) && text(profile.Status || profile.status).toLowerCase() !== 'inactive') return { success: true, user: user(profile) };
     const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
     const indexed = Object.values(indexedRoot)[0];
-    if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {
+  if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {
       const linkedProfile = { ...indexed, UID: result.user.uid, EmailKey: emailKey(email), UserID: indexed.UserID, Email: email, Role: 'teacher', Status: 'Active' };
       await db.ref(`authProfiles/${firebaseKey(result.user.uid)}`).set(linkedProfile);
       return { success: true, user: user(linkedProfile) };
     }
     return { success: true, needsSetup: true, uid: result.user.uid, email, name: result.user.displayName || email };
+  };
+
+  // One repository contract for the staff tabs. The UI may still use the
+  // legacy Google Apps Script-shaped transport during the migration, but all
+  // new CRUD calls now receive the same scope context and return the server
+  // result directly. This prevents each tab from inventing its own term,
+  // subject, level, room and identity combination.
+  const repositoryContext = (context = {}) => {
+    const user = context.user || {};
+    return {
+      ...context,
+      userId: text(context.userId || user.id || user.userId || user.UserID),
+      termId: text(context.termId || context.term || window.CURRENT_SERVER_TERM),
+      term: text(context.term || context.termId || window.CURRENT_SERVER_TERM),
+      subjectCode: text(context.subjectCode || context.subject),
+      level: text(context.level),
+      room: text(context.room),
+      user
+    };
+  };
+  const repositoryRead = (name, payload, options) => callReadWithRecovery(name, [payload], options);
+  const repositoryWrite = (name, payload) => callWithWriteTimeout(name, [payload]);
+  window.classroomRepository = {
+    normalizeContext: repositoryContext,
+    getAllowedScopes: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 }).then(result => {
+        const payload = result && result.data ? result.data : {};
+        return {
+          success: !!(result && result.success),
+          term: payload.meta && payload.meta.term || normalized.termId,
+          levels: payload.levels || [],
+          rooms: payload.rooms || [],
+          subjects: payload.subjects || [],
+          combos: payload.combos || [],
+          teacherClasses: payload.teacherClasses || [],
+          studentsLite: payload.students || [],
+          data: payload
+        };
+      });
+    },
+    getDashboard: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getDashboardStats', [normalized.term], { timeoutMs: 12000, retries: 0 });
+    },
+    getStudents: (context = {}) => repositoryRead('getStudentsByFilter', repositoryContext(context)),
+    getAssignments: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 })
+        .then(result => {
+          const rows = result && result.data && Array.isArray(result.data.assignments) ? result.data.assignments : [];
+          return { ...result, data: rows.filter(row =>
+            (!normalized.subjectCode || text(row.subjectCode || row.SubjectCode) === normalized.subjectCode) &&
+            (!normalized.level || text(row.level || row.Level) === normalized.level) &&
+            (!normalized.room || text(row.room || row.Room) === normalized.room)
+          ) };
+        });
+    },
+    getAttendance: (context = {}) => repositoryRead('getAttendanceForCheck', repositoryContext(context)),
+    getScoreGrid: (context = {}) => repositoryRead('loadScoresGrid', repositoryContext(context)),
+    getGradingRoster: (context = {}) => repositoryRead('getGradingData', repositoryContext(context)),
+    saveAttendance: (context = {}) => repositoryWrite('saveAttendance', repositoryContext(context)),
+    saveScores: (context = {}) => repositoryWrite('saveScoresBatch', repositoryContext(context)),
+    saveScore: (context = {}) => repositoryWrite('saveScoresBatch', repositoryContext(context)),
+    saveGrades: (context = {}) => repositoryWrite('saveGradingBatch', repositoryContext(context))
   };
 
   window.firebaseAuthReady = ready;
@@ -1441,9 +1576,33 @@
   window.firebaseSubscribeGradingData = subscribeGradingData;
   // Bounded read fallback used only when the realtime score bootstrap cannot
   // complete. It reads the same central Firebase data and never writes.
-  window.firebaseLoadScoresGrid = (request) => callReadWithRecovery('loadScoresGrid', [request], { timeoutMs: 12000, retries: 0 });
+  window.firebaseLoadScoresGrid = (request) => window.classroomRepository.getScoreGrid(request);
 
   const base = { withSuccessHandler(fn) { this._success = fn; return this; }, withFailureHandler(fn) { this._failure = fn; return this; } };
   window.google = window.google || {}; window.google.script = window.google.script || {};
-  window.google.script.run = new Proxy(base, { get(target, prop) { if (prop in target) return target[prop]; return (...args) => { const success = target._success; const failure = target._failure; target._success = target._failure = null; const name = String(prop); const request = isReadCall(prop) ? callReadWithRecovery(prop, args) : (name === 'saveStudent' || name === 'setStudentStatus' ? callWithWriteTimeout(prop, args) : call(prop, args)); request.then((value) => success && success(value)).catch((error) => failure && failure(error)); return target; }; } });
+  const repositoryRoutes = {
+    getStudentsByFilter: (args) => window.classroomRepository.getStudents(args[0] || {}),
+    getAttendanceForCheck: (args) => window.classroomRepository.getAttendance(args[0] || {}),
+    loadScoresGrid: (args) => window.classroomRepository.getScoreGrid(args[0] || {}),
+    getGradingData: (args) => window.classroomRepository.getGradingRoster(args[0] || {}),
+    getDashboardStats: (args) => window.classroomRepository.getDashboard({ term: args[0] }),
+    getInitialDropdowns: (args) => window.classroomRepository.getAllowedScopes({ termId: window.CURRENT_SERVER_TERM, user: args[0] }),
+    saveAttendance: (args) => window.classroomRepository.saveAttendance(args[0] || {}),
+    saveScoresBatch: (args) => window.classroomRepository.saveScores(args[0] || {}),
+    saveGradingBatch: (args) => window.classroomRepository.saveGrades(args[0] || {})
+  };
+  window.google.script.run = new Proxy(base, { get(target, prop) {
+    if (prop in target) return target[prop];
+    return (...args) => {
+      const success = target._success;
+      const failure = target._failure;
+      target._success = target._failure = null;
+      const name = String(prop);
+      const request = repositoryRoutes[name]
+        ? repositoryRoutes[name](args)
+        : (isReadCall(prop) ? callReadWithRecovery(prop, args) : (name === 'saveStudent' || name === 'setStudentStatus' ? callWithWriteTimeout(prop, args) : call(prop, args)));
+      request.then((value) => success && success(value)).catch((error) => failure && failure(error));
+      return target;
+    };
+  } });
 })();

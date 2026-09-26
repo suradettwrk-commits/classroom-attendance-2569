@@ -121,7 +121,8 @@ window.supabaseConfig = {
     return text(a) === text(b) || text(a).replace(/\s+/g, '') === text(b).replace(/\s+/g, '');
   }
   function termFilterCandidates(termRows, requestedTerm) {
-    const requested = text(requestedTerm);
+    const active = (termRows || []).find(row => text(row && (row.status || row.Status)).toLowerCase() === 'active') || (termRows || [])[0];
+    const requested = text(requestedTerm) || text(active && (active.display_label || active.term || active.Term)) || text(active && (active.term_id || active.TermID || active.termId));
     if (!requested) return [];
     const candidates = new Set([requested]);
     (termRows || []).forEach(row => {
@@ -223,7 +224,9 @@ window.supabaseConfig = {
     const raw = text(value);
     const terms = rootCache && Object.values(rootCache.terms || {}) || [];
     const found = terms.find(row => raw === text(row.TermID || row.term_id || row.termId) || raw === `${text(row.TermNo || row.term_no)}/${text(row.AcademicYear || row.academic_year)}` || raw === text(row.display_label));
-    return found ? text(found.TermID || found.term_id || found.termId) : raw;
+    // Keep the stored term primary key as the only database identity. Labels
+    // such as 1/2569 are for display and must not be written as a second key.
+    return found ? text(found.term_id || found.TermID || found.termId) : raw;
   }
   function pathParts(path) { return String(path || '').split('/').filter(Boolean); }
   async function persist(name, key, value) {
@@ -352,6 +355,10 @@ window.supabaseConfig = {
       });
       return authReadyPromise.then((user) => {
         if (user) return user;
+        // Supabase Auth is the only production identity provider. Never
+        // manufacture an anonymous Firebase identity here: it makes the UI
+        // appear logged in while every protected CRUD write is rejected.
+        if (window.__SUPABASE_MODE__) return null;
         let timer;
         const timeout = new Promise((_, reject) => {
           timer = setTimeout(() => {
@@ -397,7 +404,11 @@ window.supabaseConfig = {
     if (!root || !raw) return raw;
     const found = values('terms', root).find((t) => text(t.TermID) === raw || termLabel(t) === raw || `${text(t.TermNo)}/${text(t.AcademicYear)}` === raw);
     if (!found) return raw;
-    return text(found.CanonicalTermID || found.TermKey || `TERM_${text(found.AcademicYear)}_${text(found.TermNo)}`) || text(found.TermID);
+    // TermID is the persisted database key. The visible label (for example
+    // 1/2569) is only a presentation value and must never be replaced by a
+    // synthetic key such as TERM_2569_1. Older rows use a timestamp-shaped
+    // TermID, so every read/write path must resolve back to this exact value.
+    return text(found.TermID || found.term_id || found.CanonicalTermID || found.TermKey) || raw;
   }
   function classScopeKey(term, level, room, root) {
     const termId = canonicalTermId(term, root);
@@ -469,17 +480,23 @@ window.supabaseConfig = {
   }
   function teacherClasses(root) { return values('teacherClasses', root).map((row) => teacherClass(row, root)); }
   function assistant(row, root) { return { id: text(row.AssistantID), assistantId: text(row.AssistantID), studentId: text(row.AssistantStudentID || row.StudentID || row.studentId), subjectCode: text(row.SubjectCode || row.subjectCode), level: text(row.Level || row.level), room: text(row.Room || row.room), term: normalizedTerm(row.TermID || row.term || row.Term, root), status: text(row.Status || row.status), assignedBy: text(row.AssignedBy), updatedAt: row.UpdatedAt }; }
-  function findTeacherClass(root, teacherId, subjectCode, level, room, term, classId) {
-    const wantedTerm = canonicalTerm(term, root);
-    const wantedClassId = text(classId);
-    return values('teacherClasses', root).find((row) =>
+  function allowedScopeRows(root, identity, term, subjectCode) {
+    const role = text(identity && (identity.role || identity.Role)).toLowerCase();
+    const userId = text(identity && (identity.id || identity.userId || identity.UserID));
+    const wantedSubject = text(subjectCode);
+    return values('teacherClasses', root).filter((row) =>
       text(row.Status || row.status).toLowerCase() !== 'inactive' &&
-      text(row.TeacherID || row.teacherId) === text(teacherId) &&
-      text(row.SubjectCode || row.subjectCode || row.subject) === text(subjectCode) &&
+      matchesTerm(row.TermID || row.Term || row.term, term, root) &&
+      (role === 'admin' || text(row.TeacherID || row.teacherId) === userId) &&
+      (!wantedSubject || text(row.SubjectCode || row.subjectCode || row.subject) === wantedSubject)
+    );
+  }
+  function findTeacherClass(root, teacherId, subjectCode, level, room, term, classId) {
+    const wantedClassId = text(classId);
+    return allowedScopeRows(root, { id: teacherId, role: 'teacher' }, term, subjectCode).find((row) =>
       (!wantedClassId || text(row.ClassID || row.classId) === wantedClassId) &&
       text(row.Level || row.level) === text(level) &&
-      text(row.Room || row.room) === text(room) &&
-      matchesTerm(row.TermID || row.Term || row.term, wantedTerm, root)
+      text(row.Room || row.room) === text(room)
     ) || null;
   }
   function teacherClassKey(teacherId, subjectCode, level, room, term) {
@@ -979,9 +996,7 @@ window.supabaseConfig = {
     const termMatches = (value) => matchesTerm(value, selectedTerm, root);
     const role = text(currentUser && currentUser.role).toLowerCase();
     const allTeacherClasses = values('teacherClasses', root).filter((r) => termMatches(r.TermID || r.Term || r.term) && text(r.Status || r.status).toLowerCase() !== 'inactive');
-    const scopedTeacherClasses = role === 'admin'
-      ? allTeacherClasses
-      : allTeacherClasses.filter((r) => text(r.TeacherID || r.teacherId) === text(currentUser && currentUser.id));
+    const scopedTeacherClasses = allowedScopeRows(root, currentUser, selectedTerm);
     const allowedClasses = scopedTeacherClasses.map((r) => ({ subject: text(r.SubjectCode || r.subjectCode), level: text(r.Level || r.level), room: text(r.Room || r.room) })).filter((r) => r.subject && r.level && r.room);
     const isAllowedStudent = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room));
     const isAllowedAssignment = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room) && x.subject === text(r.SubjectCode || r.subjectCode));
@@ -998,6 +1013,18 @@ window.supabaseConfig = {
     await ready();
     if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
+  async function staffProfileFromAuth(firebaseUser) {
+    const email = text(firebaseUser && firebaseUser.email).toLowerCase();
+    if (!email) return null;
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
+      const { data: row, error } = await window.__SUPABASE_CLIENT__.from('app_users').select('*').eq('email', email).maybeSingle();
+      if (error) throw error;
+      const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
+      return { ...legacy, ...(row || {}) };
+    }
+    const indexedRoot = (await db.ref('authProfiles').once('value')).val() || {};
+    return Object.values(rawMap(indexedRoot)).find((row) => text(row.Email || row.email).toLowerCase() === email) || null;
+  }
   async function teacherOrAdmin(payload) {
     await ready();
     const firebaseUser = auth.currentUser;
@@ -1006,11 +1033,13 @@ window.supabaseConfig = {
     if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
-    const profile = (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
+    const profile = await staffProfileFromAuth(firebaseUser) || (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
-    return { admin: false, teacherId: text(profile.UserID || profile.id), firebaseUid: firebaseUser.uid };
+    const teacherId = text(profile.UserID || profile.userId || profile.user_id || profile.id || profile.legacy_user_id);
+    if (!teacherId) throw new Error('บัญชีครูยังไม่มีรหัสผู้ใช้ที่ผูกกับสิทธิ์การสอน');
+    return { admin: false, teacherId, firebaseUid: firebaseUser.uid };
   }
   async function teacherAssignmentOrAdmin(payload) {
     const authz = await teacherOrAdmin(payload);
@@ -1240,7 +1269,51 @@ window.supabaseConfig = {
       return { success: true, data: Object.values(usersRoot).map(user) };
     }
     if (name === 'getTerms') return { success: true, data: values('terms', root) };
-    if (name === 'getAttendance' || name === 'getAttendanceForCheck') return { success: true, data: values('attendance', root).map((r) => attendance(r, root)) };
+    if (name === 'getAttendance') return { success: true, data: values('attendance', root).map((r) => attendance(r, root)) };
+    if (name === 'getAttendanceForCheck') {
+      // The attendance screen needs the complete class roster even when the
+      // selected date has no saved attendance rows yet. Returning only the
+      // existing attendance records makes a valid empty day look like an
+      // empty class, so build the roster and merge the day's records here.
+      const p = arg || {};
+      const selectedTerm = activeTerm(root, p.term);
+      const identity = p.user || currentUser || {};
+      const role = text(identity && (identity.role || identity.Role)).toLowerCase();
+      const userId = text(identity && (identity.id || identity.userId || identity.UserID));
+      const subjectCode = text(p.subjectCode || p.subject);
+      const level = text(p.level);
+      const room = text(p.room);
+      const date = text(p.date).slice(0, 10);
+      const scopeRows = allowedScopeRows(root, identity, selectedTerm, subjectCode);
+      const allowed = role === 'admin' || scopeRows.some((row) =>
+        text(row.Level || row.level) === level && text(row.Room || row.room) === room
+      );
+      if (role !== 'admin' && !userId) return resultError('ไม่พบตัวตนครูสำหรับตรวจสอบสิทธิ์');
+      if (role !== 'admin' && !allowed) return resultError('ครูไม่มีสิทธิ์เช็คชั้น/ห้อง/วิชานี้');
+      const roster = values('students', root)
+        .filter((row) => matchesTerm(row.TermID || row.Term || row.term, selectedTerm, root))
+        .filter((row) => text(row.Level || row.level) === level && text(row.Room || row.room) === room)
+        .map((row) => student(row, root))
+        .sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0) || String(a.id).localeCompare(String(b.id), 'th'));
+      const dayRows = values('attendance', root)
+        .map((row) => attendance(row, root))
+        .filter((row) => matchesTerm(row.termId || row.term, selectedTerm, root))
+        .filter((row) => (!subjectCode || row.subjectCode === subjectCode) && (!level || row.level === level) && (!room || row.room === room) && (!date || String(row.date || '').slice(0, 10) === date));
+      const byStudent = new Map(dayRows.map((row) => [String(row.studentId), row]));
+      const students = roster.map((row) => {
+        const saved = byStudent.get(String(row.id));
+        const savedStatus = saved ? text(saved.status) : '';
+        return {
+          ...row,
+          attStatus: savedStatus,
+          attNote: saved ? saved.note : '',
+          attRecorder: savedStatus ? saved.recorder : '',
+          attTime: savedStatus ? saved.timestamp : '',
+          isChecked: !!savedStatus
+        };
+      });
+      return { success: true, students, count: dayRows.length, matched: students.length, term: selectedTerm };
+    }
     if (name === 'getStudentModeData') {
       const id = text(args[0]); const s = values('students', root).find((r) => text(r.StudentID) === id);
       return { success: true, data: { student: s ? student(s, root) : null, students: s ? [student(s, root)] : [], attendance: values('attendance', root).map((r) => attendance(r, root)).filter((r) => r.studentId === id), scores: values('scores', root).map(score).filter((r) => r.studentId === id), assignments: values('assignments', root).map((r) => assignment(r, root)), subjects: values('subjects', root).map(subject) } };
@@ -1272,7 +1345,7 @@ window.supabaseConfig = {
           if (value === undefined || (value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100))) throw new Error(`คะแนน ${component} ของนักเรียน ${studentId} ต้องอยู่ระหว่าง 0 ถึง 100`);
           const key = gradeKey(term, subjectCode, studentId, component), expected = arg.baseRecords?.[studentId]?.[component], actual = currentScores[key]?.Score ?? '';
           if (expected !== undefined && text(actual) !== text(expected)) { conflicts.push({ studentId, component, expected, actual }); return; }
-          updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: value, IsSubmitted: value !== '' ? 1 : 0, Term: term, Timestamp: new Date().toISOString() };
+          updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: value, IsSubmitted: value !== '' ? 1 : 0, TermID: canonicalTermId(term, root), Term: term, Timestamp: new Date().toISOString() };
         });
       });
       if (conflicts.length) return { success: false, conflict: true, conflicts, message: `พบข้อมูลถูกแก้ไขจากอุปกรณ์อื่น ${conflicts.length} ช่อง จึงไม่เขียนทับข้อมูลเดิม` };
@@ -1306,7 +1379,7 @@ window.supabaseConfig = {
             const expected = arg.baseRecords?.[studentId]?.[component];
             const actual = currentScores[key]?.Score ?? '';
             if (expected !== undefined && text(actual) !== text(expected)) { conflicts.push({ studentId, component, expected, actual }); return; }
-            updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: scores[component], IsSubmitted: scores[component] !== '' ? 1 : 0, Term: term, Timestamp: new Date().toISOString() };
+            updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: scores[component], IsSubmitted: scores[component] !== '' ? 1 : 0, TermID: canonicalTermId(term, root), Term: term, Timestamp: new Date().toISOString() };
           }
         });
       });
@@ -1459,7 +1532,7 @@ window.supabaseConfig = {
         if (!studentId) throw new Error('ไม่พบรหัสนักเรียนในข้อมูลเช็คชื่อ');
         const rawId = text(record.recordId || record.RecordID || `${date}_${studentId}_${subjectCode}`);
         updates[`attendance/${firebaseKey(rawId)}`] = withoutUndefined({
-          RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
+          RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: canonicalTermId(term, root), Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
           Status: Object.prototype.hasOwnProperty.call(record || {}, 'status') || Object.prototype.hasOwnProperty.call(record || {}, 'Status')
             ? text(record.status !== undefined ? record.status : record.Status)
             : 'มา',
@@ -1493,7 +1566,7 @@ window.supabaseConfig = {
           StudentID: studentId,
           TeacherClassID: teacherClassId,
           ClassID: classId || undefined,
-          TermID: classId && termId ? termId : undefined,
+          TermID: canonicalTermId(term, root),
           SubjectCode: subjectCode,
           Level: level,
           Room: room,
@@ -1552,7 +1625,7 @@ window.supabaseConfig = {
            const classId = text(existing.ClassID || existing.classId || scope.ClassID || scope.classId);
            const termId = text(existing.TermID || existing.termId || scope.TermID || scope.termId);
            const legacyTeacherClassId = text(existing.TeacherClassID || existing.teacherClassId) || (classId && termId ? '' : text(scope.TeacherClassID || scope.teacherClassId || scope.id));
-           record = withoutUndefined({ ...existing, StudentID: key, TeacherClassID: legacyTeacherClassId || undefined, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Status: requestedStatus || text(existing.Status || existing.status) || 'Active' });
+           record = withoutUndefined({ ...existing, StudentID: key, TeacherClassID: legacyTeacherClassId || undefined, ClassID: classId || undefined, TermID: canonicalTermId(termId || arg.term, root), Status: requestedStatus || text(existing.Status || existing.status) || 'Active' });
          } else {
            record = withoutUndefined({
              ...existing,
@@ -1715,12 +1788,77 @@ window.supabaseConfig = {
     if (profile && profile.UserID && ['admin', 'teacher'].includes(text(profile.Role || profile.role).toLowerCase()) && text(profile.Status || profile.status).toLowerCase() !== 'inactive') return { success: true, user: user(profile) };
     const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
     const indexed = Object.values(indexedRoot)[0];
-    if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {
+  if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {
       const linkedProfile = { ...indexed, UID: result.user.uid, EmailKey: emailKey(email), UserID: indexed.UserID, Email: email, Role: 'teacher', Status: 'Active' };
       await db.ref(`authProfiles/${firebaseKey(result.user.uid)}`).set(linkedProfile);
       return { success: true, user: user(linkedProfile) };
     }
     return { success: true, needsSetup: true, uid: result.user.uid, email, name: result.user.displayName || email };
+  };
+
+  // One repository contract for the staff tabs. The UI may still use the
+  // legacy Google Apps Script-shaped transport during the migration, but all
+  // new CRUD calls now receive the same scope context and return the server
+  // result directly. This prevents each tab from inventing its own term,
+  // subject, level, room and identity combination.
+  const repositoryContext = (context = {}) => {
+    const user = context.user || {};
+    return {
+      ...context,
+      userId: text(context.userId || user.id || user.userId || user.UserID),
+      termId: text(context.termId || context.term || window.CURRENT_SERVER_TERM),
+      term: text(context.term || context.termId || window.CURRENT_SERVER_TERM),
+      subjectCode: text(context.subjectCode || context.subject),
+      level: text(context.level),
+      room: text(context.room),
+      user
+    };
+  };
+  const repositoryRead = (name, payload, options) => callReadWithRecovery(name, [payload], options);
+  const repositoryWrite = (name, payload) => callWithWriteTimeout(name, [payload]);
+  window.classroomRepository = {
+    normalizeContext: repositoryContext,
+    getAllowedScopes: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 }).then(result => {
+        const payload = result && result.data ? result.data : {};
+        return {
+          success: !!(result && result.success),
+          term: payload.meta && payload.meta.term || normalized.termId,
+          levels: payload.levels || [],
+          rooms: payload.rooms || [],
+          subjects: payload.subjects || [],
+          combos: payload.combos || [],
+          teacherClasses: payload.teacherClasses || [],
+          studentsLite: payload.students || [],
+          data: payload
+        };
+      });
+    },
+    getDashboard: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getDashboardStats', [normalized.term], { timeoutMs: 12000, retries: 0 });
+    },
+    getStudents: (context = {}) => repositoryRead('getStudentsByFilter', repositoryContext(context)),
+    getAssignments: (context = {}) => {
+      const normalized = repositoryContext(context);
+      return callReadWithRecovery('getInitialSystemData', [normalized.termId, normalized.user], { timeoutMs: 12000, retries: 0 })
+        .then(result => {
+          const rows = result && result.data && Array.isArray(result.data.assignments) ? result.data.assignments : [];
+          return { ...result, data: rows.filter(row =>
+            (!normalized.subjectCode || text(row.subjectCode || row.SubjectCode) === normalized.subjectCode) &&
+            (!normalized.level || text(row.level || row.Level) === normalized.level) &&
+            (!normalized.room || text(row.room || row.Room) === normalized.room)
+          ) };
+        });
+    },
+    getAttendance: (context = {}) => repositoryRead('getAttendanceForCheck', repositoryContext(context)),
+    getScoreGrid: (context = {}) => repositoryRead('loadScoresGrid', repositoryContext(context)),
+    getGradingRoster: (context = {}) => repositoryRead('getGradingData', repositoryContext(context)),
+    saveAttendance: (context = {}) => repositoryWrite('saveAttendance', repositoryContext(context)),
+    saveScores: (context = {}) => repositoryWrite('saveScoresBatch', repositoryContext(context)),
+    saveScore: (context = {}) => repositoryWrite('saveScoresBatch', repositoryContext(context)),
+    saveGrades: (context = {}) => repositoryWrite('saveGradingBatch', repositoryContext(context))
   };
 
   window.firebaseAuthReady = ready;
@@ -1729,11 +1867,35 @@ window.supabaseConfig = {
   window.firebaseSubscribeGradingData = subscribeGradingData;
   // Bounded read fallback used only when the realtime score bootstrap cannot
   // complete. It reads the same central Firebase data and never writes.
-  window.firebaseLoadScoresGrid = (request) => callReadWithRecovery('loadScoresGrid', [request], { timeoutMs: 12000, retries: 0 });
+  window.firebaseLoadScoresGrid = (request) => window.classroomRepository.getScoreGrid(request);
 
   const base = { withSuccessHandler(fn) { this._success = fn; return this; }, withFailureHandler(fn) { this._failure = fn; return this; } };
   window.google = window.google || {}; window.google.script = window.google.script || {};
-  window.google.script.run = new Proxy(base, { get(target, prop) { if (prop in target) return target[prop]; return (...args) => { const success = target._success; const failure = target._failure; target._success = target._failure = null; const name = String(prop); const request = isReadCall(prop) ? callReadWithRecovery(prop, args) : (name === 'saveStudent' || name === 'setStudentStatus' ? callWithWriteTimeout(prop, args) : call(prop, args)); request.then((value) => success && success(value)).catch((error) => failure && failure(error)); return target; }; } });
+  const repositoryRoutes = {
+    getStudentsByFilter: (args) => window.classroomRepository.getStudents(args[0] || {}),
+    getAttendanceForCheck: (args) => window.classroomRepository.getAttendance(args[0] || {}),
+    loadScoresGrid: (args) => window.classroomRepository.getScoreGrid(args[0] || {}),
+    getGradingData: (args) => window.classroomRepository.getGradingRoster(args[0] || {}),
+    getDashboardStats: (args) => window.classroomRepository.getDashboard({ term: args[0] }),
+    getInitialDropdowns: (args) => window.classroomRepository.getAllowedScopes({ termId: window.CURRENT_SERVER_TERM, user: args[0] }),
+    saveAttendance: (args) => window.classroomRepository.saveAttendance(args[0] || {}),
+    saveScoresBatch: (args) => window.classroomRepository.saveScores(args[0] || {}),
+    saveGradingBatch: (args) => window.classroomRepository.saveGrades(args[0] || {})
+  };
+  window.google.script.run = new Proxy(base, { get(target, prop) {
+    if (prop in target) return target[prop];
+    return (...args) => {
+      const success = target._success;
+      const failure = target._failure;
+      target._success = target._failure = null;
+      const name = String(prop);
+      const request = repositoryRoutes[name]
+        ? repositoryRoutes[name](args)
+        : (isReadCall(prop) ? callReadWithRecovery(prop, args) : (name === 'saveStudent' || name === 'setStudentStatus' ? callWithWriteTimeout(prop, args) : call(prop, args)));
+      request.then((value) => success && success(value)).catch((error) => failure && failure(error));
+      return target;
+    };
+  } });
 })();
 </script>
 <script>/* Supabase Auth facade used by the existing staff login flow. */
@@ -2231,7 +2393,11 @@ class DataController {
      * @param {Object} filter { date: "2024-06-01", subject: "ส21101", ... }
      */
     getAttendance(filter) {
-        if (!this.db || !this.db.attendance) return { success: false, message: 'กำลังโหลดข้อมูล...' };
+        // An attendance map without the current roster is not a usable local
+        // result. Return a miss so the scoped repository/server path can
+        // provide the class roster immediately instead of retrying an empty
+        // response several times.
+        if (!this.db || !this.db.attendance || !Array.isArray(this.db.students) || !this.db.students.length) return { success: false, message: 'กำลังโหลดรายชื่อนักเรียน...' };
 
         // 1. ดึงรายชื่อนักเรียนในห้องนั้นมาก่อน
         const term = this.normalizeTermValue(filter.term || (this.db.meta ? this.db.meta.term : ''), this.term);
@@ -2442,6 +2608,19 @@ var DATA_CONTROLLER = new DataController();
     .content-tab > .bg-white { border-color: #e1e7ff !important; box-shadow: 0 10px 28px rgba(71, 85, 105, .07) !important; }
     .content-tab input:focus, .content-tab select:focus, .content-tab textarea:focus { border-color: #818cf8 !important; box-shadow: 0 0 0 4px rgba(129, 140, 248, .16) !important; }
     #sync-status { border-color: #bae6fd !important; background: linear-gradient(90deg, #ecfeff, #eef2ff) !important; }
+
+    /* Attendance status controls must not depend on runtime-generated Tailwind
+       class names. The status buttons are injected after page load, so keep
+       their selected colors in ordinary CSS that is always available. */
+    .attendance-status-option { color: #94a3b8; background: transparent; }
+    .attendance-status-option:hover { background: #e2e8f0; }
+    .attendance-status-option.attendance-status-selected { color: #fff !important; }
+    .attendance-status-option.attendance-status-green { background: #22c55e !important; }
+    .attendance-status-option.attendance-status-yellow { background: #facc15 !important; color: #713f12 !important; }
+    .attendance-status-option.attendance-status-blue { background: #60a5fa !important; }
+    .attendance-status-option.attendance-status-red { background: #ef4444 !important; }
+    .attendance-status-option[aria-disabled="true"] { background: #e2e8f0 !important; color: #94a3b8 !important; }
+
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div { position: relative; overflow: hidden; border: 0 !important; color: #fff; box-shadow: 0 12px 24px rgba(30, 41, 59, .10) !important; }
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div::after { content: ''; position: absolute; width: 110px; height: 110px; right: -35px; top: -45px; border-radius: 999px; background: rgba(255,255,255,.16); }
     #tab-dashboard > .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 > div:nth-child(1) { background: linear-gradient(135deg, #6366f1, #8b5cf6) !important; }
@@ -3675,17 +3854,11 @@ var DATA_CONTROLLER = new DataController();
             if (nextKey === this.storageKey) return;
             this.storageKey = nextKey;
             this.queue = LocalStore.get(this.storageKey) || [];
-            // Auth can restore after a score was queued. Reuse the anonymous
-            // queue for the now-verified account, while retaining the old key
-            // as a recovery copy in case the browser is switched back.
-            if (!this.queue.length && nextKey !== 'sync_queue_anonymous') {
-                const anonymousQueue = LocalStore.get('sync_queue_anonymous') || [];
-                if (anonymousQueue.length) {
-                    this.queue = anonymousQueue;
-                    this.save();
-                    console.warn('SYNC_ENGINE: adopted anonymous queue for verified account', nextKey, anonymousQueue.length);
-                }
-            }
+            // Never adopt an anonymous queue into a verified account. The
+            // anonymous namespace may belong to another person using this
+            // browser, and replaying it could write data under the wrong
+            // teacher. Anonymous work remains isolated until the user
+            // explicitly reviews or clears it from this device.
             this.purgeStaleQueue();
             this.updateUI(this.queue.length ? 'pending' : 'synced');
             console.log('SYNC_ENGINE: switched isolated queue to', this.storageKey);
@@ -4501,7 +4674,7 @@ var DATA_CONTROLLER = new DataController();
             const gradingSubject = getEl('grading-subject');
             if (gradingSubject) {
                 const selected = gradingSubject.value;
-                gradingSubject.innerHTML = subjects.map(s => `<option value="${esc(s.code)}">${esc(getSubjectDisplayLabel(s))}</option>`).join('');
+                gradingSubject.innerHTML = subjects.map(s => `<option value="${gradingEsc(s.code)}">${gradingEsc(getSubjectDisplayLabel(s))}</option>`).join('');
                 if (subjects.some(s => s.code === selected)) gradingSubject.value = selected;
             }
             if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
@@ -5161,6 +5334,15 @@ var DATA_CONTROLLER = new DataController();
                 // The grading tab shares the main system's Firebase/bootstrap data.
                 // Wait for that bootstrap on a fresh browser session so filters are
                 // never rendered empty just because the tab was opened first.
+                const hydrateGradingFilters = (attempt = 0) => {
+                    const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : null;
+                    if (liveDb) populateSelects({ term: liveDb.meta && liveDb.meta.term, subjects: liveDb.subjects || [], levels: liveDb.levels || [], rooms: liveDb.rooms || [], combos: liveDb.combos || [], teacherClasses: liveDb.teacherClasses || [], studentsLite: liveDb.students || [] });
+                    if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
+                    const levelReady = !!getEl('grading-level')?.options.length;
+                    const roomReady = !!getEl('grading-room')?.options.length;
+                    if ((!levelReady || !roomReady) && attempt < 20) return setTimeout(() => hydrateGradingFilters(attempt + 1), 300);
+                    loadNativeGradingData();
+                };
                 const waitForSharedData = (startedAt = Date.now()) => {
                     const rows = value => Array.isArray(value) ? value : Object.values(value || {});
                     const liveSubjects = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? rows(DATA_CONTROLLER.db.subjects).length : 0;
@@ -5172,16 +5354,15 @@ var DATA_CONTROLLER = new DataController();
                         // an empty cached bootstrap must never hide real subjects.
                         loadAdminSettingsBootstrap(true, () => {
                             const subjectSelect = getEl('grading-subject');
-                            if (subjectSelect && subjectSelect.options.length > 0) return loadNativeGradingData();
+                            if (subjectSelect && subjectSelect.options.length > 0) return hydrateGradingFilters();
                             // Some teacher profiles receive the class scope before
                             // the subject catalog. Read the catalog separately,
                             // still applying the same scope in populateNativeGradingFilters.
                             google.script.run.withSuccessHandler(result => {
                                 const rows = result && result.success ? (result.data || []) : [];
                                 if (rows.length) window.SUBJECTS_CACHE = rows.map(normalizeSubjectRecord).filter(s => s.code);
-                                populateNativeGradingFilters();
-                                loadNativeGradingData();
-                            }).withFailureHandler(() => loadNativeGradingData()).getSubjects();
+                                hydrateGradingFilters();
+                            }).withFailureHandler(() => hydrateGradingFilters()).getSubjects();
                         });
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
@@ -6349,6 +6530,7 @@ var DATA_CONTROLLER = new DataController();
         };
         return { fetchData, openAddModal, openEditModal, openCopyAssignmentsModal, refreshCopySourceAssignments, toggleCopySelection, copySelectedAssignments, handleSaveAssignment, handleDeleteAssignment, updateLocalScore, handlePaste, moveAssignment, saveAll, saveDirty, _clearDirtyKeys, _markScoreSynced, _onScoreSyncSuccess, print, downloadImage, downloadExcel, exportExcel, exportToSheet, highlightRow, toggleExportScoreVisibility };
     })();
+    window.SCORES_MANAGER = SCORES_MANAGER;
 
     function canManageAttendanceAssistant() {
         const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
@@ -6764,11 +6946,11 @@ var DATA_CONTROLLER = new DataController();
                 let buttonsHtml = `<div class="inline-flex bg-slate-100 p-1 rounded-lg w-full max-w-[280px]">`;
                 statusOptions.forEach(opt => {
                     const isChecked = (status === opt.val) ? 'checked' : '';
-                    let bgClass = `peer-checked:bg-${opt.color}-500`; if(opt.color === 'yellow') bgClass = `peer-checked:bg-yellow-400`;
-                    const selectedClass = '';
-                    const selectedStyle = '';
-                    // Add onclick handler for auto-sync (fires even if already selected)
-                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
+                    const selectedClass = status === opt.val ? `attendance-status-selected attendance-status-${opt.color}` : '';
+                    // The selected class is explicit because these controls are
+                    // rendered dynamically and cannot rely on Tailwind's
+                    // compile-time class extraction.
+                    buttonsHtml += `<button type="button" class="flex-1 relative border-0 p-0 bg-transparent ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" data-attendance-id="${s.id}" data-attendance-status="${opt.val}" ${inactive ? 'disabled title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : ''}><span class="attendance-status-option ${selectedClass} block py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 z-0" aria-disabled="${inactive ? 'true' : 'false'}">${opt.label}</span></button>`;
                 });
                 buttonsHtml += `</div>`;
 
@@ -6789,6 +6971,10 @@ var DATA_CONTROLLER = new DataController();
                 html += `<tr class="${inactive ? 'bg-slate-100 text-slate-500' : 'hover:bg-slate-50'} border-b transition-colors ${pending ? 'bg-orange-50/30' : ''}"><td class="p-4 text-slate-500">${s.no}</td><td class="p-4 text-xs font-mono text-slate-400">${s.id}</td><td class="p-4 font-bold">${studentName}${inactiveBadge}</td><td class="p-4 text-center">${buttonsHtml}</td><td class="p-4"><input class="att-note w-full text-xs p-2 border border-transparent hover:border-slate-200 rounded-lg focus:border-school-primary focus:bg-white bg-transparent outline-none transition" value="${s.attNote||''}" placeholder="หมายเหตุ..." ${inactive ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ไขได้"' : `oninput="ATTENDANCE_MANAGER.updateNote('${s.id}', this.value)"`}></td><td id="att-info-${s.id}" class="p-4 border-l border-slate-50">${infoHtml}</td></tr>`;
             });
             els.tbody.innerHTML = html;
+            els.tbody.querySelectorAll('[data-attendance-id][data-attendance-status]').forEach(label => {
+                if (label.disabled) return;
+                label.addEventListener('click', () => updateStatus(label.dataset.attendanceId, label.dataset.attendanceStatus));
+            });
         };
 
         const updateStatus = (id, newStatus) => {
@@ -6801,15 +6987,16 @@ var DATA_CONTROLLER = new DataController();
             }
             // 1. Optimistic Update State
             const student = state.students.find(s => s.id == id);
-            if (student && student.isChecked && String(student.attStatus || 'มา') === String(newStatus || 'มา')) {
-                console.log('ATTENDANCE queueSync skipped unchanged saved status', id, newStatus);
-                return;
-            }
+            // Clicking the selected status again deliberately clears it. This
+            // keeps the status buttons reversible instead of leaving a saved
+            // "มา" stuck on the row after the teacher changes their mind.
+            const currentStatus = student ? String(student.attStatus || '') : '';
+            const nextStatus = student && student.isChecked && currentStatus === String(newStatus || '') ? '' : String(newStatus || '');
             if(student) {
-                student.attStatus = newStatus;
+                student.attStatus = nextStatus;
                 student.attRecorder = CURRENT_USER ? CURRENT_USER.name : 'Me';
                 student.attTime = new Date().toISOString();
-                student.isChecked = true;
+                student.isChecked = !!nextStatus;
                 
                 // Manual DOM update for the info cell to avoid full re-render
                 const infoEl = getEl(`att-info-${id}`);
@@ -6821,13 +7008,17 @@ var DATA_CONTROLLER = new DataController();
 
                 // [NEW] Update DATA_CONTROLLER cache immediately
                 if (typeof DATA_CONTROLLER !== 'undefined') {
-                    DATA_CONTROLLER.updateAttendanceRecord(state.filter.term, state.filter.date, state.filter.subject, id, newStatus, student.attNote);
+                    DATA_CONTROLLER.updateAttendanceRecord(state.filter.term, state.filter.date, state.filter.subject, id, nextStatus, student.attNote);
                 }
             }
-            
+
             // 2. Queue Sync
-            queueSync(id, newStatus, student ? student.attNote : undefined);
-            
+            queueSync(id, nextStatus, student ? student.attNote : undefined);
+
+            // Re-render the row controls so clicking an already-selected
+            // status visibly clears the radio selection as well as the data.
+            render();
+
             // 3. Update Cache (Scoped cache for current view)
             const cacheKey = getScopedCacheKey('ATTENDANCE', [state.filter.date, state.filter.subject, state.filter.level, state.filter.room]);
             LocalStore.set(cacheKey, state.students);
@@ -7162,6 +7353,10 @@ var DATA_CONTROLLER = new DataController();
 
         return { load, render, updateStatus, updateNote, clearToday, markAllPresent, saveAll, state };
     })();
+    // Dynamic inline handlers in the legacy UI resolve managers from window.
+    // Keep the local const for internal code, but expose the same instance so
+    // attendance controls can update state when clicked.
+    window.ATTENDANCE_MANAGER = ATTENDANCE_MANAGER;
 
     window.onSyncSuccess = function(task) {
         if (task.type === 'SCORE') {
@@ -7184,12 +7379,14 @@ var DATA_CONTROLLER = new DataController();
                 if (!rec) return;
                 var std = students.find(function(s) { return String(s.id) === String(rec.id); });
                 if (!std) return;
-                var infoEl = getEl('att-info-' + rec.id);
-                if (infoEl) {
-                    infoEl.innerHTML = '<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">' + (std.attRecorder || '') + '</span></div><div class="text-[10px] text-green-500 mt-1 leading-tight"><i class="fa-solid fa-circle-check"></i> ' + timeStr + '</div></div>';
-                    var rowEl = infoEl.closest('tr');
-                    if (rowEl) rowEl.classList.remove('bg-blue-50/30', 'bg-orange-50/30');
-                }
+                var savedStatus = String(rec.status !== undefined ? rec.status : (rec.Status || '')).trim();
+                std.attStatus = savedStatus;
+                std.isChecked = !!savedStatus;
+                std.attRecorder = savedStatus ? (std.attRecorder || (CURRENT_USER ? CURRENT_USER.name : 'Me')) : '';
+                std.attTime = savedStatus ? (std.attTime || new Date().toISOString()) : '';
+                // A blank status is a valid clear operation. Render from state
+                // so the UI cannot incorrectly report a green saved status.
+                ATTENDANCE_MANAGER.render();
             });
         }
     };
@@ -9769,10 +9966,19 @@ var DATA_CONTROLLER = new DataController();
             ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
-        const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))].sort(naturalSort);
+        // On a cold production session the shared student snapshot can arrive
+        // after the grading tab is opened. Reuse the already hydrated scoped
+        // selectors as a short-lived fallback so the filters never remain
+        // blank while the realtime snapshot catches up.
+        const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
+        const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
+        const levelValues = [...new Set((subjectClasses.map(classLevel).filter(Boolean).length ? subjectClasses.map(classLevel).filter(Boolean) : scopedLevelOptions))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const roomValues = [...new Set(subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean))].sort(naturalSort);
+        const scopedRoomsForLevel = scopedRoomOptions;
+        const roomValues = [...new Set((subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean).length
+            ? subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean)
+            : scopedRoomsForLevel))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
