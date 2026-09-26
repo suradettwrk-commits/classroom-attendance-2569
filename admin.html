@@ -2333,7 +2333,11 @@
         // Save only the server-provided scope. Some bridge responses expose
         // teacherClasses instead of the derived combos, so derive them here.
         const classRows = data.teacherClasses || (data.data && data.data.teacherClasses) || [];
-        window.CLASS_COMBOS = (data.combos && data.combos.length ? data.combos : classRows.map(x => ({ subject: x.subjectCode, level: x.level, room: x.room }))).filter(x => x && x.subject && x.level && x.room);
+        window.CLASS_COMBOS = (data.combos && data.combos.length ? data.combos : classRows.map(x => ({
+            subject: x.subject || x.subjectCode || x.SubjectCode || x.subject_code,
+            level: x.level || x.Level || x.classLevel || x.class_level,
+            room: x.room || x.Room || x.classRoom || x.class_room
+        }))).filter(x => x && x.subject && x.level && x.room);
         enforceTeacherGradingSubjectScope();
         
         let term = window.CURRENT_SERVER_TERM;
@@ -2490,6 +2494,12 @@
             return [...new Set(values.map(x => String(x).trim()).filter(Boolean))].sort((a,b) => parseInt(a)-parseInt(b) || a.localeCompare(b));
         };
 
+        const normalizeCombo = x => ({
+            subject: String(x && (x.subject || x.subjectCode || x.SubjectCode || x.subject_code) || '').trim(),
+            level: String(x && (x.level || x.Level || x.classLevel || x.class_level) || '').trim(),
+            room: String(x && (x.room || x.Room || x.classRoom || x.class_room) || '').trim()
+        });
+        const isTeacher = String((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) || '').toLowerCase() === 'teacher';
         const getScopedCombos = () => {
             const role = String((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) || '').toLowerCase();
             if (role === 'teacher') {
@@ -2497,9 +2507,9 @@
                     ? window.CLASS_COMBOS
                     : (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.teacherClasses)
                         ? DATA_CONTROLLER.db.teacherClasses : []);
-                return scoped.map(x => ({ subject: x.subjectCode, level: x.level, room: x.room })).filter(x => x.subject && x.level && x.room);
+                return scoped.map(normalizeCombo).filter(x => x.subject && x.level && x.room);
             }
-            return window.CLASS_COMBOS || [];
+            return (window.CLASS_COMBOS || []).map(normalizeCombo).filter(x => x.subject && x.level && x.room);
         };
 
         const refreshOptions = () => {
@@ -2510,7 +2520,15 @@
             let filteredCombos = combos.filter(x => String(x.subject).trim() === String(selectedSubject).trim());
             
             // Fallback: If no combos returned from server, infer from students list
-            if (combos.length === 0 || filteredCombos.length === 0 || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && String(CURRENT_USER.role || '').toLowerCase() === 'admin')) {
+            if (isTeacher && filteredCombos.length === 0) {
+                // A teacher must never fall back to the global student list:
+                // an unmatched subject means that subject is not assigned to
+                // the teacher, so both dependent selects must be empty.
+                updateSelectOptions(levelEl, []);
+                updateSelectOptions(roomIdEl, []);
+                return;
+            }
+            if (!isTeacher && (combos.length === 0 || filteredCombos.length === 0 || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && String(CURRENT_USER.role || '').toLowerCase() === 'admin'))) {
                 let localStudents = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db.students || [] : [];
                 let levels = [...new Set(localStudents.map(s => s.level).filter(Boolean))].sort();
                 let rooms = [...new Set(localStudents.map(s => String(s.room)).filter(Boolean))].sort((a,b) => parseInt(a)-parseInt(b) || a.localeCompare(b));
@@ -2568,7 +2586,12 @@
             let filteredCombos = combos.filter(x => String(x.subject).trim() === String(selectedSubject).trim());
             
             let rooms = [];
-            if (combos.length === 0 || filteredCombos.length === 0 || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && String(CURRENT_USER.role || '').toLowerCase() === 'admin')) {
+            if (isTeacher && filteredCombos.length === 0) {
+                updateSelectOptions(roomIdEl, []);
+                scheduleLoad();
+                return;
+            }
+            if (!isTeacher && (combos.length === 0 || filteredCombos.length === 0 || (typeof CURRENT_USER !== 'undefined' && CURRENT_USER && String(CURRENT_USER.role || '').toLowerCase() === 'admin'))) {
                 let localStudents = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db.students || [] : [];
                 rooms = [...new Set(localStudents.filter(s => s.level === selectedLevel).map(s => String(s.room)).filter(Boolean))].sort((a,b) => parseInt(a)-parseInt(b) || a.localeCompare(b));
             } else {
@@ -2586,9 +2609,11 @@
     }
 
     function updateSelectOptions(el, items) {
+        items = Array.isArray(items) ? items : [];
         const currentVal = el.value;
-        if (!items || items.length === 0) return;
-        el.innerHTML = items.map(i => `<option value="${i}">${i}</option>`).join('');
+        el.innerHTML = (!items || items.length === 0)
+            ? '<option value="">ไม่มีห้อง/ระดับชั้นตามสิทธิ์</option>'
+            : items.map(i => `<option value="${i}">${i}</option>`).join('');
         if (items.includes(currentVal)) {
             el.value = currentVal;
         } else if (items.length > 0) {
