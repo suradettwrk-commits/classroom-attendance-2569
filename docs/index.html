@@ -92,6 +92,12 @@ window.supabaseConfig = {
         window.history.replaceState({}, document.title, clean.toString());
       })
     : Promise.resolve();
+  // Expose OAuth callback settlement so the app auth bootstrap cannot race
+  // the session exchange and require a second login click.
+  window.__SUPABASE_CALLBACK_READY__ = callbackReady.catch(error => {
+    console.error('SUPABASE_CALLBACK_SESSION_FAILED', error);
+    return null;
+  });
   const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
   const text = value => String(value == null ? '' : value).trim();
   const tableNames = ['terms', 'students', 'subjects', 'teacherClasses', 'assignments', 'attendance', 'scores', 'users', 'authProfiles', 'settings'];
@@ -4610,6 +4616,11 @@ var DATA_CONTROLLER = new DataController();
         
         let finalLevels = Array.from(allLevels).sort();
         let finalRooms = Array.from(allRooms).sort((a,b) => parseInt(a) - parseInt(b) || String(a).localeCompare(String(b)));
+        const currentRole = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+        if (currentRole === 'teacher' && window.CLASS_COMBOS.length) {
+            finalLevels = [...new Set(window.CLASS_COMBOS.map(x => String(x.level || '').trim()).filter(Boolean))].sort();
+            finalRooms = [...new Set(window.CLASS_COMBOS.map(x => String(x.room || '').trim()).filter(Boolean))].sort((a,b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
+        }
         window.ALL_LEVEL_OPTIONS = finalLevels;
         window.ALL_ROOM_OPTIONS = finalRooms;
         
@@ -4641,7 +4652,7 @@ var DATA_CONTROLLER = new DataController();
             subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
             const opts = subjects.map(s => `<option value="${s.code}">${getSubjectDisplayLabel(s)}</option>`).join('');
-            ['att-subject', 'sc-subject', 'asn-subject'].forEach(id => { 
+            ['att-subject', 'sc-subject', 'asn-subject', 'grading-subject'].forEach(id => { 
                 const el = getEl(id);
                 if (el) {
                     const currentVal = el.value;
@@ -4722,8 +4733,10 @@ var DATA_CONTROLLER = new DataController();
         const getScopedCombos = () => {
             const role = String((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) || '').toLowerCase();
             if (role === 'teacher') {
-                const scoped = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.teacherClasses)
-                    ? DATA_CONTROLLER.db.teacherClasses : [];
+                const scoped = window.CLASS_COMBOS.length
+                    ? window.CLASS_COMBOS
+                    : (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.teacherClasses)
+                        ? DATA_CONTROLLER.db.teacherClasses : []);
                 return scoped.map(x => ({ subject: x.subjectCode, level: x.level, room: x.room })).filter(x => x.subject && x.level && x.room);
             }
             return window.CLASS_COMBOS || [];
@@ -9739,7 +9752,9 @@ var DATA_CONTROLLER = new DataController();
             // and incorrectly return to the login screen.
             if ((bridgeReady || supabaseReady) && firebaseReady) {
                 if (!window.__authBootstrapPromise) {
-                    window.__authBootstrapPromise = new Promise((resolve) => {
+                    window.__authBootstrapPromise = Promise.resolve(window.__SUPABASE_CALLBACK_READY__)
+                        .catch(() => null)
+                        .then(() => new Promise((resolve) => {
                         let settled = false;
                         let unsubscribe = null;
                         const finish = (user) => {
@@ -9753,7 +9768,7 @@ var DATA_CONTROLLER = new DataController();
                             clearTimeout(timeout);
                             finish(user);
                         });
-                    });
+                        }));
                 }
                 window.__authBootstrapPromise.then(async (user) => {
                     // Supabase may finish processing the OAuth callback just

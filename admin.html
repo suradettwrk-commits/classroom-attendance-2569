@@ -2342,6 +2342,11 @@
         
         let finalLevels = Array.from(allLevels).sort();
         let finalRooms = Array.from(allRooms).sort((a,b) => parseInt(a) - parseInt(b) || String(a).localeCompare(String(b)));
+        const currentRole = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+        if (currentRole === 'teacher' && window.CLASS_COMBOS.length) {
+            finalLevels = [...new Set(window.CLASS_COMBOS.map(x => String(x.level || '').trim()).filter(Boolean))].sort();
+            finalRooms = [...new Set(window.CLASS_COMBOS.map(x => String(x.room || '').trim()).filter(Boolean))].sort((a,b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
+        }
         window.ALL_LEVEL_OPTIONS = finalLevels;
         window.ALL_ROOM_OPTIONS = finalRooms;
         
@@ -2373,7 +2378,7 @@
             subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
             const opts = subjects.map(s => `<option value="${s.code}">${getSubjectDisplayLabel(s)}</option>`).join('');
-            ['att-subject', 'sc-subject', 'asn-subject'].forEach(id => { 
+            ['att-subject', 'sc-subject', 'asn-subject', 'grading-subject'].forEach(id => { 
                 const el = getEl(id);
                 if (el) {
                     const currentVal = el.value;
@@ -2454,8 +2459,10 @@
         const getScopedCombos = () => {
             const role = String((typeof CURRENT_USER !== 'undefined' && CURRENT_USER && CURRENT_USER.role) || '').toLowerCase();
             if (role === 'teacher') {
-                const scoped = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.teacherClasses)
-                    ? DATA_CONTROLLER.db.teacherClasses : [];
+                const scoped = window.CLASS_COMBOS.length
+                    ? window.CLASS_COMBOS
+                    : (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.teacherClasses)
+                        ? DATA_CONTROLLER.db.teacherClasses : []);
                 return scoped.map(x => ({ subject: x.subjectCode, level: x.level, room: x.room })).filter(x => x.subject && x.level && x.room);
             }
             return window.CLASS_COMBOS || [];

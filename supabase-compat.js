@@ -37,6 +37,12 @@
         window.history.replaceState({}, document.title, clean.toString());
       })
     : Promise.resolve();
+  // Expose OAuth callback settlement so the app auth bootstrap cannot race
+  // the session exchange and require a second login click.
+  window.__SUPABASE_CALLBACK_READY__ = callbackReady.catch(error => {
+    console.error('SUPABASE_CALLBACK_SESSION_FAILED', error);
+    return null;
+  });
   const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
   const text = value => String(value == null ? '' : value).trim();
   const tableNames = ['terms', 'students', 'subjects', 'teacherClasses', 'assignments', 'attendance', 'scores', 'users', 'authProfiles', 'settings'];
