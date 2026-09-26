@@ -4410,10 +4410,17 @@ var DATA_CONTROLLER = new DataController();
             const subjects = rows.map(normalizeSubjectRecord).filter(s => s.code);
             if (!subjects.length) return;
             window.SUBJECTS_CACHE = subjects;
+            window.__SHARED_SUBJECTS = subjects;
             populateSelects({ subjects });
             // The tab can be switching while this async read completes;
             // hydrate the native grading selects regardless of the transient
             // visibility state, then load its table when the filters exist.
+            const gradingSubject = getEl('grading-subject');
+            if (gradingSubject) {
+                const selected = gradingSubject.value;
+                gradingSubject.innerHTML = subjects.map(s => `<option value="${esc(s.code)}">${esc(getSubjectDisplayLabel(s))}</option>`).join('');
+                if (subjects.some(s => s.code === selected)) gradingSubject.value = selected;
+            }
             if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
             if (typeof loadNativeGradingData === 'function' && getEl('grading-subject')) loadNativeGradingData();
         }).withFailureHandler(err => console.warn('Subject catalog read fallback failed:', String(err))).getSubjects();
@@ -9519,7 +9526,9 @@ var DATA_CONTROLLER = new DataController();
         const classLevel = c => String(c.level || c.Level || '');
         const classRoom = c => String(c.room || c.Room || '');
         const scopedSubjectCodes = new Set(scopedClasses.map(classSubject).filter(Boolean));
-        const subjectSource = rows(window.SUBJECTS_CACHE).length
+        const subjectSource = rows(window.__SHARED_SUBJECTS).length
+            ? rows(window.__SHARED_SUBJECTS)
+            : rows(window.SUBJECTS_CACHE).length
             ? rows(window.SUBJECTS_CACHE)
             : (rows(boot.subjects).length ? rows(boot.subjects) : rows(liveDb.subjects));
         let normalizedSubjects = subjectSource.map(normalizeSubjectRecord).filter(s => s.code);
