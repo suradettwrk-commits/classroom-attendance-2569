@@ -33,7 +33,7 @@
       const onSuccess = success, onFailure = failure; success = failure = null;
       const method = String(prop);
       const action = method === 'loadScoresGrid' ? 'load' : method === 'saveScoresBatch' ? 'save' : method === 'getDashboardStats' ? 'dashboard' : method === 'getCurrentUserProfile' ? 'profile' : 'bootstrap';
-      const input = method === 'getCurrentUserProfile' ? { email: window.__AUTH_EMAIL || window.firebase?.auth?.().currentUser?.email || '' } : (payload || {});
+      const input = method === 'getCurrentUserProfile' ? { email: window.__AUTH_EMAIL || window.__SUPABASE_AUTH_USER?.email || window.firebase?.auth?.().currentUser?.email || '' } : (payload || {});
       request(action, input).then((value) => {
         if (method === 'getInitialSystemData' && value && value.data) onSuccess && onSuccess(value);
         else onSuccess && onSuccess(value);

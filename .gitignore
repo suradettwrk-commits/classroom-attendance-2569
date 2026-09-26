@@ -13,3 +13,4 @@ _BACKUP_*
 .idea/
 .tools/
 supabase/.temp/
+node_modules/

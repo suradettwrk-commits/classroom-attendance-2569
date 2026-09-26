@@ -127,11 +127,11 @@ Deno.serve(async (request) => {
     if (action === "profile") {
       const requestedEmail = normalizeEmail(body.email);
       if (auth.admin && ADMIN_EMAILS.has(requestedEmail)) {
-        return json({success:true, data:{id:"admin",username:requestedEmail.split("@")[0],email:requestedEmail,role:"admin",status:"Active"}}, 200, request);
+        return json({success:true, data:{id:"admin",username:requestedEmail.split("@")[0],email:requestedEmail,name:"สุรเดช ธรรมประโชติ",role:"admin",status:"Active"}}, 200, request);
       }
       const profiles = await api(`app_users?email=ilike.${enc(requestedEmail)}&select=user_id,username,email,role,status&limit=10`);
       const profile = profiles.find((row: any) => normalizeEmail(row.email) === requestedEmail && text(row.status).toLowerCase() !== "inactive");
-      return json({success:!!profile, data:profile ? {id:profile.user_id,username:profile.username,email:normalizeEmail(profile.email),role:profile.role,status:profile.status} : null}, 200, request);
+      return json({success:!!profile, data:profile ? {id:profile.user_id,username:profile.username,email:normalizeEmail(profile.email),name:profile.username,role:profile.role,status:profile.status} : null}, 200, request);
     }
     const ctx = await context(body, auth);
     if (action === "load") return json(output(ctx), 200, request);

@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '..');
 const files = [];
 function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (['.git', 'node_modules', 'docs'].includes(entry.name)) continue;
+    if (['.git', 'node_modules', 'docs', 'scratch'].includes(entry.name) || entry.name.startsWith('_BACKUP_')) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full);
     else if (/\.(js|html|ts|sql|md|json)$/.test(entry.name)) files.push(full);

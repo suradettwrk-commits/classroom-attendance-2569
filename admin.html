@@ -1408,7 +1408,8 @@
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
             if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
             const role = String(CURRENT_USER.role || '').toLowerCase();
-            return role !== 'admin' || authEmail === 'suradet.t@wrk.ac.th';
+            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
+            return role !== 'admin' || adminEmails.includes(authEmail);
         }
 
         attendanceKey(payload) {
@@ -2909,7 +2910,7 @@
             clearScoreView('กำลังโหลดรายชื่อนักเรียนและคะแนน...');
             setLoading(true);
             setScoreControlsLocked(true);
-            if (typeof window.firebaseSubscribeScoreGrid === 'function') {
+            if (typeof window.firebaseSubscribeScoreGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
                 const requestId = ++activeServerRequestId;
                 activeServerRequestKey = requestKey;
                 realtimeUnsubscribe = window.firebaseSubscribeScoreGrid({ subject, subjectCode: subject, level, room, term }, (res) => {
@@ -3069,7 +3070,7 @@
                     if (!retryTransientRead()) renderEmptyState("เชื่อมต่อ Server ไม่ได้ กรุณาตรวจสอบการเชื่อมต่อ");
                 };
             const scoreRequest = { subject: subject, subjectCode: subject, level: level, room: room, term: term, user: CURRENT_USER };
-            if (typeof window.firebaseLoadScoresGrid === 'function') {
+            if (typeof window.firebaseLoadScoresGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
                 window.firebaseLoadScoresGrid(scoreRequest).then(handleScoreLoadSuccess).catch(handleScoreLoadFailure);
             } else {
                 google.script.run

@@ -223,7 +223,13 @@
                 throw new Error(result.message || `โหลดโปรไฟล์ไม่สำเร็จ (${response.status})`);
             }
             console.info('Supabase direct profile bootstrap succeeded', { email: result.data.email, role: result.data.role });
-            return result.data;
+            const profile = result.data;
+            if (!profile.name) {
+                profile.name = window.__SUPABASE_AUTH_USER?.user_metadata?.full_name ||
+                               window.__SUPABASE_AUTH_USER?.user_metadata?.name ||
+                               (profile.role === 'admin' ? 'สุรเดช ธรรมประโชติ' : profile.username || 'ผู้ใช้งาน');
+            }
+            return profile;
         }
 
         // --- B) Check Session (Updated) ---
@@ -272,9 +278,10 @@
                 const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
                 const authEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
-                const adminEmail = 'suradet.t@wrk.ac.th';
+                const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
+                const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
                 const emailMismatch = staffRole && identityUser && (
-                    (localRole === 'admin' && authEmail !== adminEmail) ||
+                    (localRole === 'admin' && (!isAdminEmail(authEmail) || savedEmail !== authEmail)) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
                 );
                 // A session from an older Google account must not block the
@@ -427,8 +434,13 @@
             const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
             const identityEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
             const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
+            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
+            const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
             const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
-                identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && ((role === 'admin' && identityEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === identityEmail))
+                identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && (
+                    (role === 'admin' && isAdminEmail(identityEmail) && expectedEmail === identityEmail) ||
+                    (role !== 'admin' && expectedEmail === identityEmail)
+                )
             );
             console.error('IDENTITY_CHECK_STATE:' + JSON.stringify({ role, hasIdentity: !!identityUser, hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasExpectedEmail: !!expectedEmail, emailsEqual: !!expectedEmail && expectedEmail === identityEmail, identityOk }));
             if (!identityOk) {
