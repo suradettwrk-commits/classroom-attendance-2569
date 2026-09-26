@@ -2832,6 +2832,15 @@
                 // The grading tab shares the main system's Firebase/bootstrap data.
                 // Wait for that bootstrap on a fresh browser session so filters are
                 // never rendered empty just because the tab was opened first.
+                const hydrateGradingFilters = (attempt = 0) => {
+                    const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : null;
+                    if (liveDb) populateSelects({ term: liveDb.meta && liveDb.meta.term, subjects: liveDb.subjects || [], levels: liveDb.levels || [], rooms: liveDb.rooms || [], combos: liveDb.combos || [], teacherClasses: liveDb.teacherClasses || [], studentsLite: liveDb.students || [] });
+                    if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
+                    const levelReady = !!getEl('grading-level')?.options.length;
+                    const roomReady = !!getEl('grading-room')?.options.length;
+                    if ((!levelReady || !roomReady) && attempt < 20) return setTimeout(() => hydrateGradingFilters(attempt + 1), 300);
+                    loadNativeGradingData();
+                };
                 const waitForSharedData = (startedAt = Date.now()) => {
                     const rows = value => Array.isArray(value) ? value : Object.values(value || {});
                     const liveSubjects = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? rows(DATA_CONTROLLER.db.subjects).length : 0;
@@ -2843,16 +2852,15 @@
                         // an empty cached bootstrap must never hide real subjects.
                         loadAdminSettingsBootstrap(true, () => {
                             const subjectSelect = getEl('grading-subject');
-                            if (subjectSelect && subjectSelect.options.length > 0) return loadNativeGradingData();
+                            if (subjectSelect && subjectSelect.options.length > 0) return hydrateGradingFilters();
                             // Some teacher profiles receive the class scope before
                             // the subject catalog. Read the catalog separately,
                             // still applying the same scope in populateNativeGradingFilters.
                             google.script.run.withSuccessHandler(result => {
                                 const rows = result && result.success ? (result.data || []) : [];
                                 if (rows.length) window.SUBJECTS_CACHE = rows.map(normalizeSubjectRecord).filter(s => s.code);
-                                populateNativeGradingFilters();
-                                loadNativeGradingData();
-                            }).withFailureHandler(() => loadNativeGradingData()).getSubjects();
+                                hydrateGradingFilters();
+                            }).withFailureHandler(() => hydrateGradingFilters()).getSubjects();
                         });
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
@@ -7440,10 +7448,18 @@
             ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
-        const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))].sort(naturalSort);
+        // On a cold production session the shared student snapshot can arrive
+        // after the grading tab is opened. Reuse the already hydrated scoped
+        // selectors as a short-lived fallback so the filters never remain
+        // blank while the realtime snapshot catches up.
+        const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
+        const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
+        const levelOptions = subjectClasses.map(classLevel).filter(Boolean);
+        const levelValues = [...new Set(levelOptions.length ? levelOptions : scopedLevelOptions)].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const roomValues = [...new Set(subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean))].sort(naturalSort);
+        const roomOptions = subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean);
+        const roomValues = [...new Set(roomOptions.length ? roomOptions : scopedRoomOptions)].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
