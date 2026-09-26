@@ -2714,7 +2714,19 @@
                     if (ready || Date.now() - startedAt > 12000) {
                         // Always refresh this shared source when opening grading;
                         // an empty cached bootstrap must never hide real subjects.
-                        loadAdminSettingsBootstrap(true, () => loadNativeGradingData());
+                        loadAdminSettingsBootstrap(true, () => {
+                            const subjectSelect = getEl('grading-subject');
+                            if (subjectSelect && subjectSelect.options.length > 0) return loadNativeGradingData();
+                            // Some teacher profiles receive the class scope before
+                            // the subject catalog. Read the catalog separately,
+                            // still applying the same scope in populateNativeGradingFilters.
+                            google.script.run.withSuccessHandler(result => {
+                                const rows = result && result.success ? (result.data || []) : [];
+                                if (rows.length) window.SUBJECTS_CACHE = rows.map(normalizeSubjectRecord).filter(s => s.code);
+                                populateNativeGradingFilters();
+                                loadNativeGradingData();
+                            }).withFailureHandler(() => loadNativeGradingData()).getSubjects();
+                        });
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
                     }
