@@ -70,8 +70,8 @@ window.firebaseSignInWithGoogle = async function () {
     authUser: authResult.user
   }};
 };
-if (new URLSearchParams(window.location.search || '').get('localAutoLogin') === '1') {
-  window.addEventListener('load', function () {
+if (new URLSearchParams(window.location.search || '').get('localRole')) {
+  const localAutoLogin = function () {
     setTimeout(async function () {
       try {
         const result = await window.firebaseSignInWithGoogle();
@@ -82,7 +82,10 @@ if (new URLSearchParams(window.location.search || '').get('localAutoLogin') === 
         console.error('Local auto-login failed', error);
       }
     }, 50);
-  });
+  };
+  // Run directly as this script is appended at the end of the document; the
+  // load event is not reliable in every embedded browser harness.
+  localAutoLogin();
 }
 </script>`;
 html = html.replace('</body>', `${localLoginOverride}</body>`);
