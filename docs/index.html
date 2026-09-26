@@ -4603,7 +4603,17 @@ var DATA_CONTROLLER = new DataController();
         ['st-filter-level', 'att-level', 'sc-level'].forEach(id => populate(id, finalLevels));
         ['st-filter-room', 'att-room', 'sc-room'].forEach(id => populate(id, finalRooms));
         
+        const rows = value => Array.isArray(value) ? value : Object.values(value || {});
         let subjects = data.subjects || (snapshotData && snapshotData.subjects ? snapshotData.subjects : null);
+        // Firebase realtime can deliver the student/class snapshot before the
+        // subject catalog. Keep every tab on the same subject source and use
+        // the already-loaded catalog/cache before leaving selects empty.
+        if (!rows(subjects).length && typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
+            subjects = rows(DATA_CONTROLLER.db.subjects);
+        }
+        if (!rows(subjects).length && Array.isArray(window.SUBJECTS_CACHE)) {
+            subjects = window.SUBJECTS_CACHE;
+        }
         if (subjects && subjects.length > 0) {
             subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
@@ -4982,7 +4992,19 @@ var DATA_CONTROLLER = new DataController();
                     if (ready || Date.now() - startedAt > 12000) {
                         // Always refresh this shared source when opening grading;
                         // an empty cached bootstrap must never hide real subjects.
-                        loadAdminSettingsBootstrap(true, () => loadNativeGradingData());
+                        loadAdminSettingsBootstrap(true, () => {
+                            const subjectSelect = getEl('grading-subject');
+                            if (subjectSelect && subjectSelect.options.length > 0) return loadNativeGradingData();
+                            // Some teacher profiles receive the class scope before
+                            // the subject catalog. Read the catalog separately,
+                            // still applying the same scope in populateNativeGradingFilters.
+                            google.script.run.withSuccessHandler(result => {
+                                const rows = result && result.success ? (result.data || []) : [];
+                                if (rows.length) window.SUBJECTS_CACHE = rows.map(normalizeSubjectRecord).filter(s => s.code);
+                                populateNativeGradingFilters();
+                                loadNativeGradingData();
+                            }).withFailureHandler(() => loadNativeGradingData()).getSubjects();
+                        });
                     } else {
                         setTimeout(() => waitForSharedData(startedAt), 250);
                     }
@@ -9481,7 +9503,13 @@ var DATA_CONTROLLER = new DataController();
         const subjectSource = rows(window.SUBJECTS_CACHE).length
             ? rows(window.SUBJECTS_CACHE)
             : (rows(boot.subjects).length ? rows(boot.subjects) : rows(liveDb.subjects));
-        const normalizedSubjects = subjectSource.map(normalizeSubjectRecord).filter(s => s.code);
+        let normalizedSubjects = subjectSource.map(normalizeSubjectRecord).filter(s => s.code);
+        // If the realtime catalog is still arriving, the class permission
+        // rows are already authoritative for the available subject codes.
+        // Keep the dropdown usable instead of rendering an empty select.
+        if (!normalizedSubjects.length) {
+            normalizedSubjects = [...scopedSubjectCodes].map(code => ({ code, name: code, term: selectedTerm }));
+        }
         const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
@@ -9914,6 +9942,7 @@ var DATA_CONTROLLER = new DataController();
                 return;
             }
             window.__AUTH_READY_STATE = 'verified';
+            setLoading(false);
             const loginPage = document.getElementById('page-login');
             const appPage = document.getElementById('page-app');
             const adminContainer = document.getElementById('container-admin');
