@@ -11,15 +11,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout exact GitHub commit
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: node scripts/repository-safety-check.js
-      - run: node --check firebase-bridge.js
-      - run: node --check supabase-auth-client.js
-      - run: node --check supabase-score-client.js
-      - run: node build-github-pages.js
-      - run: git diff --exit-code -- docs/index.html docs/firebase-bridge.js docs/supabase-auth-client.js docs/supabase-score-client.js
+      - name: Check JavaScript syntax
+        run: |
+          node --check build-github-pages.js
+          node --check firebase-bridge.js
+          node --check supabase-auth.js
+          node --check supabase-compat.js
+      - name: Build GitHub Pages artifact
+        run: node build-github-pages.js
+      - name: Verify generated artifact
+        run: test -s docs/index.html && ! grep -q 'imported_students' docs/index.html

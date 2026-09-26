@@ -109,6 +109,7 @@
         .sc-score-export-group .sc-action-text { display: none; }
         .sc-score-legend { grid-column: 1 / -1; margin: 0; justify-content: center; }
     }
+
     .content-tab > .bg-white { border-color: #e1e7ff !important; box-shadow: 0 10px 28px rgba(71, 85, 105, .07) !important; }
     .content-tab input:focus, .content-tab select:focus, .content-tab textarea:focus { border-color: #818cf8 !important; box-shadow: 0 0 0 4px rgba(129, 140, 248, .16) !important; }
     #sync-status { border-color: #bae6fd !important; background: linear-gradient(90deg, #ecfeff, #eef2ff) !important; }
@@ -559,7 +560,7 @@
                     <button onclick="ATTENDANCE_MANAGER.saveAll()" id="btn-att-save-all" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100">
                         <i class="fa-solid fa-floppy-disk"></i> บันทึกทั้งหมด
                     </button>
-                    <button onclick="printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
+                    <button type="button" onclick="printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
                 </div>
             </div>
 
@@ -589,22 +590,6 @@
                 </div>
             </div>
 
-            <div id="att-assistant-panel" class="hidden bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <div class="flex flex-wrap gap-3 items-end">
-                    <div class="min-w-[220px]">
-                        <label class="text-xs font-bold text-slate-400 mb-1 block uppercase">นักเรียนผู้ช่วยเช็คชื่อ</label>
-                        <select id="att-assistant-student" class="w-full border border-slate-200 rounded-xl p-2 text-sm bg-white outline-none focus:ring-2 ring-school-primary/20"></select>
-                    </div>
-                    <button id="btn-att-assistant-save" onclick="saveAttendanceAssistant()" class="btn-blue-primary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-user-check"></i> กำหนดผู้ช่วย
-                    </button>
-                    <button onclick="copyAttendanceAssistantLink()" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-link"></i> คัดลอกลิงก์หน้าเช็คชื่อ
-                    </button>
-                </div>
-                <div id="att-assistant-list" class="mt-4 text-sm text-slate-500">ยังไม่มีผู้ช่วยเช็คชื่อในเงื่อนไขนี้</div>
-                <p class="mt-3 text-xs text-slate-400">ผู้ช่วยเข้าใช้ด้วย เลขประจำตัวนักเรียน / รหัสผ่านเป็นเลขประจำตัวนักเรียน</p>
-            </div>
         </div>
 
         <!-- TAB: SCORES -->
@@ -623,6 +608,7 @@
                     <div class="sc-score-context-badge"><i class="fa-solid fa-database text-cyan-600"></i><span>ข้อมูลคะแนนของห้องที่เลือก</span></div>
                 </div>
                 <div class="sc-score-toolbar-divider"></div>
+                <div id="sc-orphan-warning" class="hidden mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status"></div>
                 <div class="sc-score-actions">
                     <div class="sc-score-action-group sc-score-manage-group"><span class="sc-score-action-label">จัดการคอลัมน์</span><div class="sc-score-action-buttons">
                         <button type="button" onclick="SCORES_MANAGER.openAddModal()" class="btn-blue-primary px-4 py-2 rounded-lg text-sm font-bold shadow-md flex items-center gap-2"><i class="fa-solid fa-plus"></i> เพิ่มงาน/สอบ</button>
@@ -682,7 +668,7 @@
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
                     <button onclick="toggleNativeGradingAssignments()" id="grading-raw-toggle" class="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-list-check mr-1"></i>แสดงคะแนนงาน</button>
                     <button onclick="openNativeSGSModal()" class="bg-pink-50 text-pink-700 border border-pink-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-table-list mr-1"></i>ข้อมูลลง SGS</button>
-                    <button onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
+                    <button type="button" onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
                     <button onclick="saveNativeGradingData()" id="grading-save-btn" class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow"><i class="fa-solid fa-floppy-disk mr-1"></i>บันทึกเกรด</button>
                 </div>
             </div>
@@ -745,7 +731,6 @@
                             <option value="">ทุกสิทธิ์ (All Roles)</option>
                             <option value="admin">ผู้ดูแลระบบ (Admin)</option>
                             <option value="teacher">ครูผู้สอน (Teacher)</option>
-                            <option value="student">นักเรียน (Student)</option>
                         </select>
                         <select id="usr-filter-status" onchange="filterUsers()" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 ring-school-primary/20">
                             <option value="">ทุกสถานะ (All Status)</option>
@@ -986,8 +971,9 @@
                 <select id="st-input-status" class="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-white outline-none focus:border-school-primary focus:ring-2 focus:ring-school-primary/20">
                     <option value="Active">กำลังเรียน (Active)</option>
                     <option value="Inactive">ลาออกแล้ว (Inactive)</option>
+                    <option value="พักการเรียน">พักการเรียน</option>
                 </select>
-                <p class="mt-1 text-[11px] text-slate-400">เมื่อตั้งเป็นลาออก แถวคะแนนจะถูกล็อก แต่คะแนนเดิมยังคงอยู่</p>
+                <p class="mt-1 text-[11px] text-slate-400">เมื่อตั้งเป็นลาออกหรือพักการเรียน แถวคะแนนและเช็คชื่อจะถูกล็อก แต่ข้อมูลเดิมยังคงอยู่</p>
             </div>
             <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-slate-100">
                 <button type="button" onclick="closeModal('student-modal')" class="px-5 py-2.5 text-slate-500 hover:bg-slate-50 rounded-xl text-sm font-bold transition">ยกเลิก</button>
@@ -1110,7 +1096,6 @@
                     <select id="usr-role" class="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-white outline-none focus:border-school-primary focus:ring-2 focus:ring-school-primary/20">
                         <option value="admin">ผู้ดูแลระบบ (Admin)</option>
                         <option value="teacher">ครูผู้สอน (Teacher)</option>
-                        <option value="student">นักเรียน (Student)</option>
                     </select>
                 </div>
                 <div><label class="text-xs font-bold text-slate-500 mb-1 block">สถานะ</label>
@@ -1338,7 +1323,7 @@
         }
 
         queueStorageKey() {
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const localUser = (typeof CURRENT_USER !== 'undefined') ? CURRENT_USER : null;
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
@@ -1403,13 +1388,12 @@
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
             if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
             const role = String(CURRENT_USER.role || '').toLowerCase();
-            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-            return role !== 'admin' || adminEmails.includes(authEmail);
+            return role !== 'admin' || authEmail === 'suradet.t@wrk.ac.th';
         }
 
         attendanceKey(payload) {
@@ -2788,7 +2772,7 @@
             if (!Number.isFinite(n)) return '';
             return Math.max(0, Math.min(Math.round(n), Number(maxScore) || 0));
         };
-        const isStudentInactive = (student) => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
+        const isStudentInactive = (student) => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
         const setScoreControlsLocked = (locked) => {
             if (els.tbody) els.tbody.querySelectorAll('input,button').forEach(el => { el.disabled = !!locked; });
             const saveAll = getEl('btn-sc-save-all'); if (saveAll) saveAll.disabled = !!locked || _saveAllInProgress;
@@ -2855,7 +2839,7 @@
 
         const fetchData = (retry = 0, options = {}) => {
             const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase());
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const authPending = staffRole && (!authUser || authUser.isAnonymous) && window.__AUTH_READY_STATE !== 'missing';
             if (authPending && !options.skipAuthWait) {
                 clearScoreView('กำลังยืนยันบัญชีเพื่อโหลดข้อมูลคะแนน...');
@@ -2910,7 +2894,7 @@
             clearScoreView('กำลังโหลดรายชื่อนักเรียนและคะแนน...');
             setLoading(true);
             setScoreControlsLocked(true);
-            if (typeof window.firebaseSubscribeScoreGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
+            if (typeof window.firebaseSubscribeScoreGrid === 'function') {
                 const requestId = ++activeServerRequestId;
                 activeServerRequestKey = requestKey;
                 realtimeUnsubscribe = window.firebaseSubscribeScoreGrid({ subject, subjectCode: subject, level, room, term }, (res) => {
@@ -3010,7 +2994,7 @@
                     activeServerRequestKey = '';
                     setLoading(false);
                     setScoreControlsLocked(false);
-                    console.log('SCORE_SERVER_RESPONSE students=' + (res && res.data && res.data.students ? res.data.students.length : 0) + ' assignments=' + (res && res.data && res.data.assignments ? res.data.assignments.length : 0) + ' scoreKeys=' + (res && res.data && res.data.scores ? Object.keys(res.data.scores).length : 0));
+                    console.log('SCORE_SERVER_RESPONSE students=' + (res && res.data && res.data.students ? res.data.students.length : 0) + ' assignments=' + (res && res.data && res.data.assignments ? res.data.assignments.length : 0) + ' scoreKeys=' + (res && res.data && res.data.scores ? Object.keys(res.data.scores).length : 0) + ' orphanScores=' + (res && res.data && res.data.orphanScores ? res.data.orphanScores.length : 0));
                     if (res && res.success && res.data) {
                         const receivedContext = scoreContextKey(res.data.term || term, res.data.subject || subject, level, room);
                         if (receivedContext !== requestKey) {
@@ -3023,6 +3007,18 @@
                             return;
                         }
                         updateState(res.data);
+                        const orphanWarning = document.getElementById('sc-orphan-warning');
+                        const orphanRows = Array.isArray(res.data.orphanScores) ? res.data.orphanScores : [];
+                        if (orphanWarning) {
+                            if (orphanRows.length) {
+                                const ids = [...new Set(orphanRows.map(row => row.assignmentId).filter(Boolean))].slice(0, 4).join(', ');
+                                orphanWarning.textContent = `พบคะแนน ${orphanRows.length} รายการที่ยังไม่พบงานต้นทาง (${ids || 'ไม่ทราบ AssignmentID'}) ระบบจะไม่ลบหรือเขียนทับคะแนนเหล่านี้ กรุณาตรวจ mapping ก่อนแก้ไข`;
+                                orphanWarning.classList.remove('hidden');
+                            } else {
+                                orphanWarning.textContent = '';
+                                orphanWarning.classList.add('hidden');
+                            }
+                        }
                         _loadedContextKey = requestKey;
                         const readbackFailures = verifyExpected ? verifyReadback(verifyExpected, res.data.scores) : [];
                         if (verifyExpected) {
@@ -3070,7 +3066,7 @@
                     if (!retryTransientRead()) renderEmptyState("เชื่อมต่อ Server ไม่ได้ กรุณาตรวจสอบการเชื่อมต่อ");
                 };
             const scoreRequest = { subject: subject, subjectCode: subject, level: level, room: room, term: term, user: CURRENT_USER };
-            if (typeof window.firebaseLoadScoresGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
+            if (typeof window.firebaseLoadScoresGrid === 'function') {
                 window.firebaseLoadScoresGrid(scoreRequest).then(handleScoreLoadSuccess).catch(handleScoreLoadFailure);
             } else {
                 google.script.run
@@ -3704,10 +3700,7 @@
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = html; 
-            // Keep the call in the click handler. A delayed window.print() can
-            // be ignored by browsers after the user activation has expired.
-            document.documentElement.offsetHeight;
-            window.print();
+            setTimeout(() => window.print(), 500);
         };
 
         const downloadImage = () => {
@@ -4288,7 +4281,7 @@
         const render = () => {
             let html = '';
             state.students.forEach(s => {
-                const inactive = ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(s.status || s.Status || '').trim().toLowerCase());
+                const inactive = ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(s.status || s.Status || '').trim().toLowerCase());
                 const hasStatus = s.attStatus !== undefined && s.attStatus !== null && String(s.attStatus).trim() !== '';
                 const status = hasStatus ? String(s.attStatus) : '';
                 const statusOptions = [ { val: 'มา', color: 'green', label: 'มา' }, { val: 'สาย', color: 'yellow', label: 'สาย' }, { val: 'ลา', color: 'blue', label: 'ลา' }, { val: 'ขาด', color: 'red', label: 'ขาด' } ];
@@ -4297,8 +4290,10 @@
                 statusOptions.forEach(opt => {
                     const isChecked = (status === opt.val) ? 'checked' : '';
                     let bgClass = `peer-checked:bg-${opt.color}-500`; if(opt.color === 'yellow') bgClass = `peer-checked:bg-yellow-400`;
+                    const selectedClass = '';
+                    const selectedStyle = '';
                     // Add onclick handler for auto-sync (fires even if already selected)
-                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกแล้ว ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
+                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
                 });
                 buttonsHtml += `</div>`;
 
@@ -4308,12 +4303,14 @@
                     infoHtml = `<div class="flex items-center gap-1.5 text-[10px] font-bold text-orange-500 animate-pulse"><i class="fa-solid fa-cloud-arrow-up"></i> Waiting Sync</div>`;
                 } else if (s.attRecorder) {
                     let time = s.attTime ? formatThaiDateTime(s.attTime, { newline: true }) : ''; 
-                    infoHtml = `<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">${s.attRecorder}</span></div><div class="text-[10px] text-slate-400 mt-1 leading-tight">${time}</div></div>`;
+                    infoHtml = `<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">${s.attRecorder}</span></div><div class="text-[10px] ${hasStatus ? 'text-green-500' : 'text-slate-400'} mt-1 leading-tight">${time}</div></div>`;
                 } else if (hasStatus) { infoHtml = '<div class="text-xs text-amber-600">รอบันทึก</div>'; }
                 else { infoHtml = '<div class="text-xs text-slate-400">ยังไม่เช็ก</div>'; }
 
                 const studentName = `${s.prefix || ''}${getStudentFirstName(s)} ${getStudentLastName(s)}`.trim();
-                const inactiveBadge = inactive ? '<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-lock"></i> ลาออกแล้ว</span>' : '';
+                const statusRaw = String(s.status || s.Status || '').trim().toLowerCase();
+                const statusBadge = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(statusRaw) ? 'พักการเรียน' : 'ลาออกแล้ว';
+                const inactiveBadge = inactive ? `<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-lock"></i> ${statusBadge}</span>` : '';
                 html += `<tr class="${inactive ? 'bg-slate-100 text-slate-500' : 'hover:bg-slate-50'} border-b transition-colors ${pending ? 'bg-orange-50/30' : ''}"><td class="p-4 text-slate-500">${s.no}</td><td class="p-4 text-xs font-mono text-slate-400">${s.id}</td><td class="p-4 font-bold">${studentName}${inactiveBadge}</td><td class="p-4 text-center">${buttonsHtml}</td><td class="p-4"><input class="att-note w-full text-xs p-2 border border-transparent hover:border-slate-200 rounded-lg focus:border-school-primary focus:bg-white bg-transparent outline-none transition" value="${s.attNote||''}" placeholder="หมายเหตุ..." ${inactive ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ไขได้"' : `oninput="ATTENDANCE_MANAGER.updateNote('${s.id}', this.value)"`}></td><td id="att-info-${s.id}" class="p-4 border-l border-slate-50">${infoHtml}</td></tr>`;
             });
             els.tbody.innerHTML = html;
@@ -4321,7 +4318,7 @@
 
         const updateStatus = (id, newStatus) => {
             const targetStudent = state.students.find(s => String(s.id) === String(id));
-            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
+            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
             if (_saveAllInProgress) {
                 console.warn('ATTENDANCE_UPDATE_BLOCKED reason=saveAll_in_progress', id, newStatus);
                 if (typeof Swal !== 'undefined') Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังบันทึกทั้งห้อง', text: 'รอบันทึกเสร็จก่อน แล้วจึงแก้ไขต่อ', showConfirmButton: false, timer: 1800 });
@@ -4363,7 +4360,7 @@
 
         const updateNote = (id, note) => {
             const targetStudent = state.students.find(s => String(s.id) === String(id));
-            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
+            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
             if (_saveAllInProgress) {
                 console.warn('ATTENDANCE_NOTE_BLOCKED reason=saveAll_in_progress', id);
                 if (typeof Swal !== 'undefined') Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังบันทึกทั้งห้อง', text: 'รอบันทึกเสร็จก่อน แล้วจึงแก้ไขต่อ', showConfirmButton: false, timer: 1800 });
@@ -4779,8 +4776,10 @@
                 printStyleEl.innerHTML = `@media print { @page { size: portrait; margin: 10mm; } }`;
             }
 
-            if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML; setTimeout(() => window.print(), 500);
+            if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML;
+            setTimeout(() => window.print(), 500);
         }
+        return false;
     }
 
     // Other Functions ...
@@ -4801,7 +4800,7 @@
 
     function isStudentInactive(studentRecord) {
         const raw = String(studentRecord && (studentRecord.status ?? studentRecord.Status) || '').trim().toLowerCase();
-        return ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(raw);
+        return ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(raw);
     }
 
     function inferStudentIconClass(prefix, icon) {
@@ -4873,7 +4872,8 @@
             const iconClass = inferStudentIconClass(s.prefix, s.icon);
             const iconDisplay = `<i class="fa-solid ${iconClass}"></i>`;
             const inactive = isStudentInactive(s);
-            const statusLabel = inactive ? 'ลาออกแล้ว' : 'Active';
+            const rawStatus = String(s.status ?? s.Status ?? '').trim().toLowerCase();
+            const statusLabel = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(rawStatus) ? 'พักการเรียน' : (inactive ? 'ลาออกแล้ว' : 'Active');
             const statusClass = inactive ? 'bg-slate-100 text-slate-600 border-slate-300' : 'bg-green-100 text-green-700 border-green-200';
             const statusIcon = inactive ? '<i class="fa-solid fa-lock"></i>' : '<div class="w-1.5 h-1.5 bg-green-500 rounded-full"></div>';
             // ป้องกัน ID มีเครื่องหมายแปลกๆ
@@ -5131,7 +5131,10 @@
         getEl('st-input-last').value = getStudentLastName(s); 
         getEl('st-input-level').value = s.level; 
         getEl('st-input-room').value = s.room; 
-        getEl('st-input-status').value = isStudentInactive(s) ? 'Inactive' : 'Active';
+        const rawStatus = String(s.status ?? s.Status ?? '').trim().toLowerCase();
+        getEl('st-input-status').value = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(rawStatus)
+            ? 'พักการเรียน'
+            : (isStudentInactive(s) ? 'Inactive' : 'Active');
     }
     
     // [MODIFIED] Optimistic Save Student
@@ -5162,7 +5165,10 @@
         const localStudents = []
             .concat(typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.students) ? DATA_CONTROLLER.db.students : [])
             .concat(Array.isArray(window.CURRENT_STUDENT_LIST) ? window.CURRENT_STUDENT_LIST : []);
-        const existingStudent = localStudents.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim() && normalizeTerm(s.term || s.Term || term) === normalizeTerm(term));
+        const studentTermMatches = s => typeof DATA_CONTROLLER !== 'undefined' && typeof DATA_CONTROLLER.rowTermMatches === 'function'
+            ? DATA_CONTROLLER.rowTermMatches(s.term || s.Term || term, term)
+            : normalizeTerm(s.term || s.Term || term) === normalizeTerm(term);
+        const existingStudent = localStudents.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim() && studentTermMatches(s));
         const sameStudentField = (left, right) => String(left == null ? '' : left).trim() === String(right == null ? '' : right).trim();
         const statusChanged = existingStudent && String(existingStudent.status ?? existingStudent.Status ?? '').trim().toLowerCase() !== String(d.status).trim().toLowerCase();
         const statusOnly = !!(statusChanged &&
@@ -5179,15 +5185,27 @@
         // 2. Optimistic UI Update (Update DATA_CONTROLLER & Render immediately)
         if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
             if (!DATA_CONTROLLER.db.students) DATA_CONTROLLER.db.students = [];
-            const idx = DATA_CONTROLLER.db.students.findIndex(s => String(s.id).trim() === String(d.id).trim() && normalizeTerm(s.term) === term);
+            const idx = DATA_CONTROLLER.db.students.findIndex(s => String(s.id).trim() === String(d.id).trim() && studentTermMatches(s));
             if (idx > -1) { 
                 DATA_CONTROLLER.db.students[idx] = { ...DATA_CONTROLLER.db.students[idx], ...d }; 
             } else { 
                 DATA_CONTROLLER.db.students.push(d); 
             }
             DATA_CONTROLLER.saveToStorage();
-            loadStudents(); // อัปเดตตารางบนหน้าจอทันที
         }
+
+        // Paint the edited row directly. The realtime listener can briefly
+        // deliver its previous snapshot while the write is being confirmed;
+        // the local UI must still show the user's successful change now.
+        const updateVisibleStudent = (list) => {
+            if (!Array.isArray(list)) return;
+            const visible = list.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim());
+            if (visible) {
+                Object.assign(visible, d);
+                _renderStudents(list, false);
+            }
+        };
+        updateVisibleStudent(window.CURRENT_STUDENT_LIST);
 
         // 3. Write the status immediately so the realtime score tab receives
         // the Firebase snapshot without waiting for the background queue.
@@ -5203,6 +5221,7 @@
         const writeCall = google.script.run
             .withSuccessHandler(res => {
                 if (!res || res.success === false) return queueStudentFallback(res && res.message);
+                loadStudents();
                 SYNC_ENGINE.updateUI('synced');
                 Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'บันทึกสถานะเรียบร้อย', showConfirmButton: false, timer: 1500 });
             })
@@ -7054,9 +7073,11 @@
     // Native grading module: uses the same Firebase bridge as the main system.
     window.NATIVE_GRADING = window.NATIVE_GRADING || { data: null, dirty: {}, base: {}, settingsDirty: false, showAssignments: false, history: [], future: [], focus: null, saving: false, autosaveTimer: null, revision: 0, saveQueued: false, retryCount: 0, loadSeq: 0, realtimeUnsubscribe: null, realtimeKey: '', realtimePending: null };
     function gradingEsc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+    function gradingNumericPart(value) { const match = String(value == null ? '' : value).match(/\d+(?:\.\d+)?/); return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER; }
     function gradingFillSelect(id, items, selected, label) {
         const el = getEl(id); if (!el) return;
         const values = (items || []).map(x => typeof x === 'object' ? { value: x.value || x.termId || x.code || '', label: label ? label(x) : (x.label || x.name || x.value || x.termId || x.code) } : { value: x, label: x }).filter(x => x.value !== '');
+        if (id === 'grading-level') values.sort((a,b) => gradingNumericPart(a.value) - gradingNumericPart(b.value) || String(a.value).localeCompare(String(b.value), 'th'));
         if (id === 'grading-room') values.sort((a,b) => (parseInt(a.value, 10) || 0) - (parseInt(b.value, 10) || 0) || String(a.value).localeCompare(String(b.value), 'th'));
         el.innerHTML = values.map(x => `<option value="${gradingEsc(x.value)}">${gradingEsc(x.label)}</option>`).join('');
         if (selected && values.some(x => String(x.value) === String(selected))) el.value = selected;
@@ -7110,7 +7131,7 @@
     async function copyNativeSGSTable(id) { const table = getEl(id); if (!table) return; const rows = [...table.querySelectorAll('tr:not(.native-sgs-control-row)')].map(row => [...row.children].map(cell => cell.innerText.trim()).join('\t')).join('\n'); let copied = false; try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(rows); copied = true; } } catch (e) {} if (!copied) { const area = document.createElement('textarea'); area.value = rows; area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.focus(); area.select(); try { copied = document.execCommand('copy'); } catch (e) {} area.remove(); } gradingSetStatus(copied ? `คัดลอกตารางแล้ว ${rows.split('\n').length} แถว ไปยัง Clipboard` : 'คัดลอกไม่สำเร็จ กรุณาอนุญาต Clipboard ของ Chrome', copied ? 'success' : 'error'); }
     function setNativeGradingDirty(sid, component, value) {
         const student = (window.NATIVE_GRADING.data?.students || []).find(item => String(item.id) === String(sid));
-        if (['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase())) return;
+        if (['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase())) return;
         window.NATIVE_GRADING.dirty[sid] = window.NATIVE_GRADING.dirty[sid] || {};
         window.NATIVE_GRADING.dirty[sid][component] = value;
         window.NATIVE_GRADING.revision = (window.NATIVE_GRADING.revision || 0) + 1;
@@ -7137,17 +7158,55 @@
         const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : {};
         const role = String(CURRENT_USER?.role || '').toLowerCase();
         const teacherId = String(CURRENT_USER?.id || '');
-        const allClasses = boot.teacherClasses || liveDb.teacherClasses || [];
-        const scopedClasses = role === 'admin' ? allClasses : allClasses.filter(c => !teacherId || String(c.teacherId || c.TeacherID || '') === teacherId);
+        // Prefer a populated bootstrap scope, but do not let an empty/stale
+        // bootstrap array hide the realtime class permissions.
+        // Bootstrap may contain only the last class returned by the settings
+        // endpoint. Merge it with the shared realtime snapshot so grading,
+        // attendance and student tabs see the same permission database.
+        const rows = value => Array.isArray(value) ? value : Object.values(value || {});
+        const classSources = []
+            .concat(rows(boot.teacherClasses))
+            .concat(rows(liveDb.teacherClasses))
+            .concat(rows(liveDb.combos))
+            // Local Test exposes the exact backup snapshot. This fallback is
+            // local-only; production continues to use Firebase bootstrap and
+            // realtime data above.
+            .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.teacherClasses) : []);
+        const allClasses = [...new Map(classSources.map(c => {
+            const key = [c.teacherId || c.TeacherID || '', c.subjectCode || c.SubjectCode || c.subject || '', c.level || c.Level || '', c.room || c.Room || ''].join('|');
+            return [key, c];
+        })).values()];
+        const termMatchesClass = c => {
+            const raw = String(c.termId || c.TermID || c.term || c.Term || '').trim();
+            return !raw || normalizeTermForUI(raw) === normalizeTermForUI(selectedTerm);
+        };
+        const termClasses = allClasses.filter(termMatchesClass);
+        const usableClasses = termClasses.length ? termClasses : allClasses;
+        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || String(c.teacherId || c.TeacherID || '') === teacherId));
         const classSubject = c => String(c.subjectCode || c.SubjectCode || c.subject || '');
         const classLevel = c => String(c.level || c.Level || '');
         const classRoom = c => String(c.room || c.Room || '');
         const scopedSubjectCodes = new Set(scopedClasses.map(classSubject).filter(Boolean));
-        const subjects = (window.SUBJECTS_CACHE || (boot.subjects || liveDb.subjects || [])).filter(s => role === 'admin' || scopedSubjectCodes.has(String(s.code || s.subjectCode || '')));
+        const subjectSource = rows(window.SUBJECTS_CACHE).length
+            ? rows(window.SUBJECTS_CACHE)
+            : (rows(boot.subjects).length ? rows(boot.subjects) : rows(liveDb.subjects));
+        const subjects = subjectSource.filter(s => role === 'admin' || scopedSubjectCodes.has(String(s.code || s.subjectCode || '')));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code || s.subjectCode, label: `${s.code || s.subjectCode} ${s.name || s.subjectName || ''}` })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
-        const subjectClasses = scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
+        const studentSources = []
+            .concat(rows(liveDb.students))
+            .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.students) : []);
+        const adminStudentClasses = [...new Map(studentSources.map(s => {
+            const level = String(s.level || s.Level || '').trim();
+            const room = String(s.room || s.Room || '').trim();
+            return [`${level}|${room}`, { level, room }];
+        }).filter(([, value]) => value.level && value.room))].map(([, value]) => value);
+        // Admins can inspect every class represented by the shared student
+        // database. Teachers remain restricted to their configured classes.
+        const subjectClasses = role === 'admin'
+            ? adminStudentClasses
+            : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))];
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
@@ -7161,7 +7220,7 @@
         const assignmentHeaders = showAssignments ? assignments.map(a => `<th class="p-2 text-center bg-amber-50 text-amber-800 whitespace-nowrap" title="${gradingEsc(a.title)}">${gradingEsc(String(a.title || '').split(':::')[0] || a.id)}<br><span class="text-[10px]">เต็ม ${gradingEsc(a.maxScore)}</span></th>`).join('') : '';
         head.innerHTML = `<tr><th class="p-3 text-left">เลขที่</th><th class="p-3 text-left">รหัส</th><th class="p-3 text-left min-w-[210px]">ชื่อ-สกุล</th>${assignmentHeaders}<th class="p-3 text-center">ภาพรวมงาน</th><th class="p-3 text-center bg-blue-50">ก่อนกลางภาค</th><th class="p-3 text-center bg-purple-50">กลางภาค</th><th class="p-3 text-center bg-blue-50">หลังกลางภาค</th><th class="p-3 text-center bg-purple-50">ปลายภาค</th><th class="p-3 text-center bg-slate-800 text-white">รวม</th><th class="p-3 text-center bg-green-500 text-white">เกรด</th><th class="p-3 text-center bg-orange-50 text-orange-700">คุณลักษณะ</th><th class="p-3 text-center bg-teal-50 text-teal-700">อ่าน/คิด</th></tr>`;
         if (!data.students?.length) { body.innerHTML = `<tr><td colspan="${10 + (showAssignments ? assignments.length : 0)}" class="p-8 text-center text-slate-400">ไม่พบข้อมูลนักเรียนในเงื่อนไขนี้</td></tr>`; return; }
-        const isInactive = student => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
+        const isInactive = student => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
         const cell = (sid, component, max=100, locked=false) => { const value = nativeGradeValue(sid, component); return `<input data-grade-student="${gradingEsc(sid)}" data-grade-component="${component}" value="${gradingEsc(value)}" type="number" min="0" max="${max}" ${locked ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ตัดเกรดได้"' : ''} class="grade-native-input w-20 text-center border rounded-lg px-2 py-1 focus:ring-2 focus:ring-indigo-200 ${locked ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : nativeScoreClass(value, max)}">`; };
         body.innerHTML = data.students.map(s => {
             const submitted = assignments.reduce((n, a) => n + (scores[`${a.id}_${s.id}`]?.isSubmitted ? 1 : 0), 0);
@@ -7198,7 +7257,13 @@
             }
             grading.data = payload; LocalStore.set(cacheKey, payload); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(payload.exams || {})); grading.history = [nativeSnapshot()]; grading.future = [];
             const s = payload.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value;
-            renderNativeGradingTable(payload); gradingSetStatus(`${sourceLabel || 'โหลดแล้ว'} ${payload.students?.length || 0} คน | งาน ${payload.assignments?.length || 0} รายการ`, 'success');
+            renderNativeGradingTable(payload);
+            const studentCount = payload.students?.length || 0;
+            const assignmentCount = payload.assignments?.length || 0;
+            const status = assignmentCount
+                ? `${sourceLabel || 'โหลดแล้ว'} ${studentCount} คน | งาน ${assignmentCount} รายการ`
+                : `${sourceLabel || 'โหลดแล้ว'} ${studentCount} คน | ยังไม่มีงานในวิชา/ห้องนี้ของเทอม ${filter.term}`;
+            gradingSetStatus(status, assignmentCount ? 'success' : 'info');
         };
         if (typeof window.firebaseSubscribeGradingData === 'function' && !forceServer) {
             if (grading.realtimeKey === cacheKey && grading.realtimePending && !gradingHasPendingEdits()) {

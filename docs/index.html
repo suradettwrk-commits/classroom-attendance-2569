@@ -44,12 +44,190 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 
-<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-database-compat.js"></script>
-<script>window.firebaseConfig={"apiKey":"AIzaSyAvkpNC0MjZjJZk_MAr1CS9wFRYlcEYR18","authDomain":"classroom-attendance-2569.firebaseapp.com","databaseURL":"https://classroom-attendance-2569-default-rtdb.asia-southeast1.firebasedatabase.app","projectId":"classroom-attendance-2569","storageBucket":"classroom-attendance-2569.firebasestorage.app","messagingSenderId":"932800813506","appId":"1:932800813506:web:316e5ffea3a3a96775de5b"};</script>
-<script>
-/* Firebase compatibility bridge for the static GitHub Pages build. */
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>// Supabase public client configuration.
+// This key is intentionally the publishable/anon key; never put a service-role
+// key or database password in a browser build.
+window.supabaseConfig = {
+  url: 'https://jvyxnsokfpnepshyyzpg.supabase.co',
+  publishableKey: 'sb_publishable_oTJWgjNgk8Oe9i8kaAUaDw_sloavHyq'
+};
+</script>
+<script>/*
+ * Supabase-backed compatibility layer.
+ *
+ * The existing application bridge already centralizes authorization,
+ * normalization, filtering, and CRUD behind Firebase-compatible refs. This
+ * layer keeps that contract while replacing the storage/auth implementation
+ * for the GitHub Pages build. Firebase is not initialized in this mode.
+ */
+(function () {
+  const cfg = window.supabaseConfig || {};
+  if (!window.supabase || !cfg.url || !cfg.publishableKey) {
+    throw new Error('Supabase client/config is not available');
+  }
+  const callbackUrl = new URL(window.location.href);
+  const callbackCode = callbackUrl.searchParams.get('code');
+  const callbackHash = new URLSearchParams(callbackUrl.hash.replace(/^#/, ''));
+  const callbackAccessToken = callbackHash.get('access_token');
+  const callbackRefreshToken = callbackHash.get('refresh_token');
+  const client = window.supabase.createClient(cfg.url, cfg.publishableKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: 'pkce' }
+  });
+  const callbackReady = callbackAccessToken && callbackRefreshToken
+    ? client.auth.setSession({ access_token: callbackAccessToken, refresh_token: callbackRefreshToken }).then(({ error }) => {
+        if (error) throw error;
+        window.__SUPABASE_SESSION_READY__ = true;
+        const clean = new URL(window.location.href);
+        clean.hash = '';
+        window.history.replaceState({}, document.title, clean.toString());
+      })
+    : callbackCode
+    ? client.auth.exchangeCodeForSession(callbackCode).then(({ error }) => {
+        if (error) throw error;
+        window.__SUPABASE_SESSION_READY__ = true;
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete('code');
+        clean.searchParams.delete('state');
+        window.history.replaceState({}, document.title, clean.toString());
+      })
+    : Promise.resolve();
+  const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
+  const text = value => String(value == null ? '' : value).trim();
+  const tableNames = ['terms', 'students', 'subjects', 'teacherClasses', 'assignments', 'attendance', 'scores', 'users', 'authProfiles', 'settings'];
+  const tableMap = { teacherClasses: 'teacher_classes', authProfiles: 'auth_profiles', users: 'app_users' };
+  const reverseTableMap = Object.fromEntries(Object.entries(tableMap).map(([a, b]) => [b, a]));
+  let rootPromise = null;
+  let rootCache = null;
+  const listeners = [];
+
+  function tableName(name) { return tableMap[name] || name; }
+  async function readAllRows(name) {
+    const rows = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await client.from(tableName(name)).select('*').range(offset, offset + pageSize - 1);
+      if (error) return { data: null, error };
+      const page = data || [];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return { data: rows, error: null };
+  }
+  function keyOf(row, name) {
+    const candidates = {
+      terms: ['TermID', 'term_id', 'termId'], students: ['StudentID', 'student_id', 'studentId'],
+      subjects: ['SubjectCode', 'subject_code', 'subjectCode'], teacherClasses: ['TeacherClassID', 'teacher_class_id', 'teacherClassId'],
+      assignments: ['AssignmentID', 'assignment_id', 'assignmentId'], attendance: ['RecordID', 'record_id', 'recordId'],
+      scores: ['ScoreID', 'score_id', 'scoreId'], users: ['UserID', 'user_id', 'userId'], authProfiles: ['id', 'legacy_user_id']
+    }[name] || [];
+    return text(candidates.map(k => row && row[k]).find(Boolean));
+  }
+  function first(row, keys) { return keys.map(k => row && row[k]).find(v => v !== undefined && v !== null); }
+  function legacyRow(name, row) {
+    const base = row && row.legacy_data && typeof row.legacy_data === 'object' ? clone(row.legacy_data) : {};
+    const out = { ...base, ...clone(row) };
+    if (name === 'terms') Object.assign(out, { TermID: first(row, ['term_id', 'termId', 'TermID']), TermNo: first(row, ['term_no', 'termNo', 'TermNo']), AcademicYear: first(row, ['academic_year', 'academicYear', 'AcademicYear']), Status: first(row, ['status', 'Status']) });
+    if (name === 'students') Object.assign(out, { StudentID: first(row, ['student_id', 'studentId', 'StudentID']), TermID: first(row, ['term_id', 'termId', 'TermID']), Term: first(row, ['display_term', 'term', 'Term', 'term_id']), StudentNo: first(row, ['student_no', 'studentNo', 'StudentNo']), Prefix: first(row, ['prefix', 'Prefix']), FirstName: first(row, ['first_name', 'firstName', 'FirstName']), LastName: first(row, ['last_name', 'lastName', 'LastName']), Level: first(row, ['level', 'Level']), Room: first(row, ['room', 'Room']), Status: first(row, ['status', 'Status']) });
+    if (name === 'subjects') Object.assign(out, { SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), TermID: first(row, ['term_id', 'termId', 'TermID']), SubjectName: first(row, ['subject_name', 'subjectName', 'SubjectName']), Teacher: first(row, ['teacher', 'Teacher']), Status: first(row, ['status', 'Status']) });
+    if (name === 'teacherClasses') Object.assign(out, { TeacherClassID: first(row, ['teacher_class_id', 'teacherClassId', 'TeacherClassID']), TermID: first(row, ['term_id', 'termId', 'TermID']), TeacherID: first(row, ['teacher_id', 'teacherId', 'TeacherID']), SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), Level: first(row, ['level', 'Level']), Room: first(row, ['room', 'Room']), Status: first(row, ['status', 'Status']) });
+    if (name === 'assignments') Object.assign(out, { AssignmentID: first(row, ['assignment_id', 'assignmentId', 'AssignmentID']), TermID: first(row, ['term_id', 'termId', 'TermID']), Term: first(row, ['term', 'Term', 'term_id']), TeacherClassID: first(row, ['teacher_class_id', 'teacherClassId', 'TeacherClassID']), SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), Title: first(row, ['title', 'Title']), AssignmentType: first(row, ['assignment_type', 'assignmentType', 'AssignmentType']), MaxScore: first(row, ['max_score', 'maxScore', 'MaxScore']), Level: first(row, ['level', 'Level']), Room: first(row, ['room', 'Room']), Status: first(row, ['status', 'Status']) });
+    if (name === 'attendance') Object.assign(out, { RecordID: first(row, ['record_id', 'recordId', 'RecordID']), TermID: first(row, ['term_id', 'termId', 'TermID']), Term: first(row, ['term', 'Term', 'term_id']), StudentID: first(row, ['student_id', 'studentId', 'StudentID']), SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), Date: first(row, ['attendance_date', 'date', 'Date']), Status: first(row, ['status', 'Status']), Note: first(row, ['note', 'Note']), Recorder: first(row, ['recorder', 'Recorder']) });
+    if (name === 'scores') Object.assign(out, { ScoreID: first(row, ['score_id', 'scoreId', 'ScoreID']), TermID: first(row, ['term_id', 'termId', 'TermID']), Term: first(row, ['term', 'Term', 'term_id']), AssignmentID: first(row, ['assignment_id', 'assignmentId', 'AssignmentID']), StudentID: first(row, ['student_id', 'studentId', 'StudentID']), SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), Score: first(row, ['score', 'Score']), IsSubmitted: first(row, ['is_submitted', 'isSubmitted', 'IsSubmitted']) });
+    if (name === 'users') Object.assign(out, { UserID: first(row, ['user_id', 'userId', 'UserID']), Username: first(row, ['username', 'Username']), Email: first(row, ['email', 'Email']), Role: first(row, ['role', 'Role']), Status: first(row, ['status', 'Status']), Name: first(row, ['name', 'Name']) });
+    return out;
+  }
+  async function loadRoot(force) {
+    if (!force && rootPromise) return rootPromise;
+    rootPromise = (async () => {
+      const entries = await Promise.all(tableNames.map(async name => {
+        const { data, error } = await readAllRows(name);
+        // A denied/optional table must not hide the core classroom data.
+        // Keep that table empty and let students, classes and records load.
+        if (error) {
+          console.warn(`SUPABASE_READ_SKIPPED:${tableName(name)}`, error.message || error);
+          return [name, {}];
+        }
+        const map = {};
+        (data || []).forEach(row => { const key = keyOf(row, name); if (key) map[key] = legacyRow(name, row); });
+        return [name, map];
+      }));
+      const root = Object.fromEntries(entries);
+      root.systemSettings = {};
+      (root.settings && Object.values(root.settings) || []).forEach(row => { const key = text(row.setting_key || row.Key || row.key); if (key) root.systemSettings[key] = { Key: key, Value: row.value ?? row.Value ?? '' }; });
+      rootCache = root;
+      return clone(root);
+    })().catch(error => { rootPromise = null; throw error; });
+    return rootPromise;
+  }
+  function canonicalTermId(value) {
+    const raw = text(value);
+    const terms = rootCache && Object.values(rootCache.terms || {}) || [];
+    const found = terms.find(row => raw === text(row.TermID || row.term_id || row.termId) || raw === `${text(row.TermNo || row.term_no)}/${text(row.AcademicYear || row.academic_year)}` || raw === text(row.display_label));
+    return found ? text(found.TermID || found.term_id || found.termId) : raw;
+  }
+  function pathParts(path) { return String(path || '').split('/').filter(Boolean); }
+  async function persist(name, key, value) {
+    const table = tableName(name);
+    if (name === 'settings' || name === 'systemSettings') {
+      const settingKey = key || text(value && (value.Key || value.key));
+      const payload = { setting_key: settingKey, term_id: value && (value.TermID || value.term_id || null), value: value && (value.Value ?? value.value ?? value), updated_at: new Date().toISOString() };
+      const { error } = await client.from('settings').upsert(payload); if (error) throw error; return;
+    }
+    const columns = { terms: 'term_id', students: 'student_id', subjects: 'subject_code', teacherClasses: 'teacher_class_id', assignments: 'assignment_id', attendance: 'record_id', scores: 'score_id', users: 'user_id', authProfiles: 'id' };
+    const idCol = columns[name];
+    if (!idCol) throw new Error(`ไม่รองรับการบันทึกตาราง ${name}`);
+    const p = { legacy_data: value, updated_at: new Date().toISOString() };
+    const set = (col, keys) => { const v = first(value, keys); if (v !== undefined && v !== null && v !== '') p[col] = v; };
+    if (name === 'terms') { p.term_id = key; set('display_label', ['display_label']); set('academic_year', ['AcademicYear','academicYear','academic_year']); set('term_no', ['TermNo','termNo','term_no']); set('status', ['Status','status']); }
+    if (name === 'students') { p.student_id=key; set('term_id',['TermID','termId','term_id','Term']); set('student_no',['StudentNo','studentNo','student_no']); set('prefix',['Prefix','prefix']); set('first_name',['FirstName','firstName','first_name']); set('last_name',['LastName','lastName','last_name']); set('level',['Level','level']); set('room',['Room','room']); set('status',['Status','status']); }
+    if (name === 'subjects') { p.subject_code=key; set('term_id',['TermID','termId','term_id']); set('subject_name',['SubjectName','subjectName','subject_name']); set('teacher',['Teacher','teacher']); set('status',['Status','status']); }
+    if (name === 'teacherClasses') { p.teacher_class_id=key; set('term_id',['TermID','termId','term_id']); set('teacher_id',['TeacherID','teacherId','teacher_id']); set('subject_code',['SubjectCode','subjectCode','subject_code']); set('level',['Level','level']); set('room',['Room','room']); set('status',['Status','status']); }
+    if (name === 'assignments') { p.assignment_id=key; set('term_id',['TermID','termId','term_id','Term']); set('teacher_class_id',['TeacherClassID','teacherClassId','teacher_class_id']); set('subject_code',['SubjectCode','subjectCode','subject_code']); set('title',['Title','title']); set('assignment_type',['AssignmentType','assignmentType','assignment_type']); set('max_score',['MaxScore','maxScore','max_score']); set('level',['Level','level']); set('room',['Room','room']); set('status',['Status','status']); }
+    if (name === 'attendance') { p.record_id=key; set('term_id',['TermID','termId','term_id','Term']); set('student_id',['StudentID','studentId','student_id']); set('subject_code',['SubjectCode','subjectCode','subject_code']); set('attendance_date',['Date','date','attendance_date']); set('status',['Status','status']); set('note',['Note','note']); set('recorder',['Recorder','recorder']); }
+    if (name === 'scores') { p.score_id=key; set('term_id',['TermID','termId','term_id','Term']); set('assignment_id',['AssignmentID','assignmentId','assignment_id']); set('student_id',['StudentID','studentId','student_id']); set('subject_code',['SubjectCode','subjectCode','subject_code']); set('score',['Score','score']); set('is_submitted',['IsSubmitted','isSubmitted','is_submitted']); }
+    if (name === 'users') { p.user_id=key; set('username',['Username','username']); set('email',['Email','email']); set('role',['Role','role']); set('status',['Status','status']); }
+    if (p.term_id && name !== 'terms') p.term_id = canonicalTermId(p.term_id);
+    // Let PostgREST use the table's declared primary key. Several migrated
+    // tables intentionally use composite (term_id, legacy_id) keys.
+    const { error } = await client.from(table).upsert(p); if (error) throw error;
+  }
+  async function remove(name, key) { const idCol = { terms:'term_id',students:'student_id',subjects:'subject_code',teacherClasses:'teacher_class_id',assignments:'assignment_id',attendance:'record_id',scores:'score_id',users:'user_id',authProfiles:'id' }[name]; if (!idCol) throw new Error(`ไม่รองรับการลบตาราง ${name}`); const { error } = await client.from(tableName(name)).delete().eq(idCol,key); if (error) throw error; }
+  class Ref {
+    constructor(path, order, equal) { this.path=String(path||'').replace(/^\/+|\/+$/g,''); this.order=order; this.equal=equal; }
+    orderByChild(child) { return new Ref(this.path, child, this.equal); }
+    equalTo(value) { return new Ref(this.path, this.order, value); }
+    async value() { const root = await loadRoot(); let value = root; for (const part of pathParts(this.path)) value = value == null ? undefined : value[part]; if (this.order && value && typeof value === 'object') value = Object.fromEntries(Object.entries(value).filter(([, row]) => text(row && (row[this.order] ?? row[this.order[0]?.toUpperCase()+this.order.slice(1)])) === text(this.equal))); return value || {}; }
+    async once() { const value = await this.value(); return { val: () => clone(value) }; }
+    on(event, handler) { const item={ref:this,handler}; listeners.push(item); this.once().then(s=>handler(s)).catch(()=>{}); return handler; }
+    off(event, handler) { const i=listeners.findIndex(x=>x.handler===handler && x.ref===this); if(i>=0) listeners.splice(i,1); }
+    async set(value) { await this.write(value); }
+    async update(values) {
+      if (!this.path) {
+        for (const [path, value] of Object.entries(values || {})) {
+          const parts = pathParts(path);
+          if (parts.length >= 2) await new Ref(`${parts[0]}/${parts[1]}`).set(value);
+        }
+        return;
+      }
+      if (pathParts(this.path).length >= 2) {
+        const current = await this.value();
+        await this.set({ ...(current || {}), ...(values || {}) });
+        return;
+      }
+      for (const [key,value] of Object.entries(values||{})) await this.write(value, key);
+    }
+    async write(value, child) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); }
+    remove() { return this.set(null); }
+  }
+  const auth = { currentUser: null, Auth:{Persistence:{LOCAL:'local'}}, setPersistence:()=>Promise.resolve(), onAuthStateChanged(cb){ let active=true; let unsubscribe=()=>{ active=false; }; (async()=>{ try { await callbackReady; } catch (error) { console.error('SUPABASE_CALLBACK_SESSION_FAILED', error); } const {data,error}=await client.auth.getSession(); if (error) console.error('SUPABASE_GET_SESSION_FAILED', error); auth.currentUser=data?.session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (!active) return; setTimeout(()=>{ if (active) cb(auth.currentUser); },0); const {data:sub}=client.auth.onAuthStateChange((_event,session)=>{auth.currentUser=session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (active) cb(auth.currentUser); }); unsubscribe=()=>{ active=false; sub.subscription.unsubscribe(); }; })(); return ()=>unsubscribe(); }, async signInAnonymously(){ throw new Error('Supabase anonymous auth is disabled'); }, async signInWithPopup(){ const {data,error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}}); if(error) throw error; return {user:auth.currentUser,data}; }, async signOut(){ const {error}=await client.auth.signOut(); if(error) throw error; auth.currentUser=null; window.__SUPABASE_SESSION_READY__ = false; } };
+  window.firebase = { initializeApp:()=>({}), auth:()=>auth, database:()=>({ref:path=>new Ref(path)}) };
+  window.__SUPABASE_MODE__ = true;
+  window.firebase.auth.Auth=auth.Auth; window.firebase.auth.GoogleAuthProvider=function GoogleAuthProvider(){};
+  window.__SUPABASE_CLIENT__=client; window.__SUPABASE_ROOT__=()=>loadRoot();
+})();
+</script>
+<script>/* Firebase compatibility bridge for the static GitHub Pages build. */
 (function () {
   const app = firebase.initializeApp(window.firebaseConfig);
   const auth = firebase.auth();
@@ -79,10 +257,6 @@
   // Writes must fail back to the durable local queue instead of leaving the
   // UI in a permanent "saving" state when Firebase never completes a request.
   const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
-  const ADMIN_EMAILS = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-  function isAdminEmail(email) {
-    return ADMIN_EMAILS.includes(String(email || '').trim().toLowerCase());
-  }
 
   function readTerms() {
     // All realtime and one-shot reads must wait for Firebase Auth restoration.
@@ -257,8 +431,7 @@
     if (!snapshotPromise) snapshotPromise = ready().then((currentUser) => {
       const publicPaths = ['students', 'subjects', 'assignments', 'attendance', 'scores', 'terms', 'teacherClasses', 'classScopes', 'attendanceAssistants'];
       const adminPaths = ['config', 'systemSettings', 'settings', 'users', 'auditLog'];
-      const isCurrentAdmin = isAdminEmail(currentUser && currentUser.email) || isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email);
-      const paths = isCurrentAdmin ? publicPaths.concat(adminPaths) : publicPaths;
+      const paths = String(currentUser && currentUser.email || '').toLowerCase() === 'suradet.t@wrk.ac.th' ? publicPaths.concat(adminPaths) : publicPaths;
       // Optional/admin-only nodes must not make the whole public dataset
       // fail. A denied /users or /settings read should degrade that node to
       // an empty object while students, classes and records still load.
@@ -764,15 +937,13 @@
   function resultError(message) { return { success: false, message }; }
   async function adminOnly() {
     await ready();
-    const currentEmail = String(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email || auth.currentUser && auth.currentUser.email || '').trim().toLowerCase();
-    if (!isAdminEmail(currentEmail)) throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ');
+    if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
   async function teacherOrAdmin(payload) {
     await ready();
-    const identityUser = window.__SUPABASE_AUTH_USER || auth.currentUser;
-    const identityEmail = String(identityUser && identityUser.email || '').toLowerCase();
-    if (isAdminEmail(identityEmail)) return { admin: true, teacherId: 'admin' };
     const firebaseUser = auth.currentUser;
+    const firebaseEmail = String(firebaseUser && firebaseUser.email || '').toLowerCase();
+    if (firebaseEmail === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin' };
     if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
       throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
     }
@@ -895,13 +1066,20 @@
     if (name === 'getCurrentUserProfile') {
       await ready();
       const id = text(args[0]);
-      const identity = window.__SUPABASE_AUTH_USER || auth.currentUser;
-      const email = String(identity?.email || '').trim().toLowerCase();
+      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
       let record = null;
-      if (isAdminEmail(email)) {
-        record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;
-        if (!record && isAdminEmail(email)) {
-          record = { UserID: 'admin', Username: email, Name: 'สุรเดช ธรรมประโชติ', Role: 'admin', Email: email, Status: 'Active' };
+      if (window.__SUPABASE_MODE__) {
+        const root = await data();
+        const users = values('users', root);
+        record = users.find((row) => text(row.UserID || row.userId || row.user_id) === id || text(row.Email || row.email).toLowerCase() === email) || null;
+        if (email === 'suradet.t@wrk.ac.th' && id === 'admin') record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
+      }
+      if (email === 'suradet.t@wrk.ac.th') {
+        if (id === 'admin') {
+          record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        } else {
+          record = (await db.ref(`users/${firebaseKey(id)}`).once('value')).val() || null;
         }
       } else if (email) {
         const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
@@ -910,24 +1088,18 @@
       }
       return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
     }
-    // Login only needs one student lookup plus the small users node. Do not
-    // download attendance, scores, or every other collection just to verify
-    // credentials; that old broad read made the app feel like a slow Sheet.
+    // Staff access is Google-only. Student credentials are intentionally not
+    // accepted by this application; student records remain data used by staff.
     if (name === 'loginSystem') {
       await ready();
       const login = text(args[0]);
       const password = text(args[1]);
-      const studentSnapshot = await db.ref('/students').orderByChild('StudentID').equalTo(login).once('value');
-      const studentRecord = Object.values(rawMap(studentSnapshot.val())).find((row) => text(row.StudentID) === login);
-      if (studentRecord && password === `wrk${login}` && text(studentRecord.Status).toLowerCase() !== 'inactive') {
-        return { success: true, user: { ...student(studentRecord), role: 'student', username: login } };
-      }
       const usersSnapshot = await db.ref('/users').once('value');
       const loginId = loginKey(login);
       const configured = Object.values(rawMap(usersSnapshot.val())).find((row) => {
         const identities = [row.Username, row.username, row.Email, row.email, row.UserID, row.userId, row.Name, row.name].map(loginKey).filter(Boolean);
         const identityMatches = identities.some((value) => value === loginId || (loginId.length >= 3 && value.includes(loginId)));
-        return identityMatches && text(row.Password || row.password) === password && text(row.Status || row.status).toLowerCase() !== 'inactive' && ['admin', 'teacher', 'attendance_assistant'].includes(text(row.Role || row.role).toLowerCase());
+        return identityMatches && text(row.Password || row.password) === password && text(row.Status || row.status).toLowerCase() !== 'inactive' && ['admin', 'teacher'].includes(text(row.Role || row.role).toLowerCase());
       });
       return configured ? { success: true, user: user(configured) } : resultError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     }
@@ -954,7 +1126,7 @@
     if (name === 'submitTeacherAccessRequest') {
       const current = await ready();
       if (!current || !current.email) throw new Error('กรุณาเข้าสู่ระบบด้วย Google ก่อน');
-      if (isAdminEmail(current.email) || isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email)) throw new Error('บัญชีผู้ดูแลระบบไม่ต้องส่งคำขอ');
+      if (String(current.email).toLowerCase() === 'suradet.t@wrk.ac.th') throw new Error('บัญชีผู้ดูแลระบบไม่ต้องส่งคำขอ');
       const subjectCode = text(arg.subjectCode), level = text(arg.level), room = text(arg.room);
       if (!subjectCode || !level || !room) throw new Error('กรุณาระบุวิชา ระดับชั้น และห้อง');
       const classes = values('teacherClasses', root); const validCombo = classes.some((r) => text(r.SubjectCode || r.subjectCode) === subjectCode && text(r.Level || r.level) === level && text(r.Room || r.room) === room && text(r.Status || r.status).toLowerCase() !== 'inactive');
@@ -985,7 +1157,7 @@
     if (name === 'getStudents' || name === 'getStudentsByFilter') {
       const p = arg || {};
       const filtered = values('students', root).map((r) => student(r, root)).filter((s) => {
-        const termOk = !p.term || termLabel(s) === text(p.term) || text(s.term) === text(p.term);
+        const termOk = !p.term || matchesTerm(s.term, p.term, root);
         const levelOk = !p.level || text(s.level) === text(p.level);
         const roomOk = !p.room || text(s.room) === text(p.room);
         const q = text(p.q || p.search).toLowerCase();
@@ -1135,8 +1307,13 @@
       const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
       const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
       const assignmentIds = new Set(assignments.map((a) => a.id)); const studentIds = new Set(students.map((s) => s.id)); const scores = {};
-      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && assignmentIds.has(text(r.AssignmentID)) && studentIds.has(text(r.StudentID))).forEach((r) => { scores[`${text(r.AssignmentID)}_${text(r.StudentID)}`] = score(r); });
-      return { success: true, data: { term: selected, students, assignments, scores } };
+      const orphanScores = [];
+      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
+        const assignmentId = text(r.AssignmentID || r.assignmentId);
+        if (assignmentIds.has(assignmentId)) scores[`${assignmentId}_${text(r.StudentID)}`] = score(r);
+        else orphanScores.push({ scoreId: text(r.ScoreID || r.scoreId), assignmentId, studentId: text(r.StudentID || r.studentId), subjectCode: text(r.SubjectCode || r.subjectCode), term: text(r.TermID || r.Term || r.term), score: r.Score ?? r.score ?? '', isSubmitted: r.IsSubmitted ?? r.isSubmitted ?? '' });
+      });
+      return { success: true, data: { term: selected, students, assignments, scores, orphanScores } };
     }
     if (name === 'getAttendanceAssistants') return { success: true, data: values('attendanceAssistants', root).map(assistant) };
     if (name === 'getTeacherClasses') return { success: true, data: values('teacherClasses', root).map((r) => teacherClass(r, root)) };
@@ -1149,7 +1326,7 @@
       return { success: true, value, folderId: value };
     }
     if (name === 'getAdminSettingsBootstrap') {
-      const isAdmin = isAdminEmail(window.__SUPABASE_AUTH_USER && window.__SUPABASE_AUTH_USER.email) || isAdminEmail(auth.currentUser && auth.currentUser.email);
+      const isAdmin = String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() === 'suradet.t@wrk.ac.th';
       const term = activeTerm(root, text(arg.term));
       const scoped = initial(root, term, arg.user).data;
       const settings = {};
@@ -1224,7 +1401,10 @@
         const rawId = text(record.recordId || record.RecordID || `${date}_${studentId}_${subjectCode}`);
         updates[`attendance/${firebaseKey(rawId)}`] = withoutUndefined({
           RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: classId && termId ? termId : undefined, Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
-          Status: text(record.status || record.Status) || 'มา', Note: text(record.note || record.Note), Recorder: text(p.recorder || p.Recorder), Timestamp: new Date().toISOString()
+          Status: Object.prototype.hasOwnProperty.call(record || {}, 'status') || Object.prototype.hasOwnProperty.call(record || {}, 'Status')
+            ? text(record.status !== undefined ? record.status : record.Status)
+            : 'มา',
+          Note: text(record.note || record.Note), Recorder: text(p.recorder || p.Recorder), Timestamp: new Date().toISOString()
         });
       });
       await db.ref('/').update(updates); snapshotPromise = null;
@@ -1273,7 +1453,7 @@
       const key = recordKey('saveStudent', arg || {});
       const requestedStatus = text(arg && (arg.status || arg.Status));
       if (!key) return resultError('ไม่พบรหัสนักเรียน');
-      if (!['Active', 'Inactive', 'ลาออกแล้ว'].includes(requestedStatus)) return resultError('สถานะนักเรียนไม่ถูกต้อง');
+      if (!['Active', 'Inactive', 'ลาออกแล้ว', 'พักการเรียน'].includes(requestedStatus)) return resultError('สถานะนักเรียนไม่ถูกต้อง');
       const current = (await db.ref(`students/${firebaseKey(key)}`).once('value')).val() || {};
       const scope = authz.teacherClass || {};
       const teacherClassId = text(current.TeacherClassID || current.teacherClassId || scope.TeacherClassID || scope.teacherClassId);
@@ -1471,9 +1651,9 @@
     snapshotPromise = null;
     authReadyPromise = Promise.resolve(result.user);
     const email = String(result.user.email || '').trim().toLowerCase();
-    if (isAdminEmail(email)) return { success: true, user: { id: 'admin', username: email, name: result.user.displayName || 'สุรเดช ธรรมประโชติ', role: 'admin', email, imageUrl: result.user.photoURL || '' } };
+    if (email === 'suradet.t@wrk.ac.th') return { success: true, user: { id: 'admin', username: email, name: result.user.displayName || 'สุรเดช ธรรมประโชติ', role: 'admin', email, imageUrl: result.user.photoURL || '' } };
     const profile = (await db.ref(`authProfiles/${firebaseKey(result.user.uid)}`).once('value')).val();
-    if (profile && profile.UserID) return { success: true, user: user(profile) };
+    if (profile && profile.UserID && ['admin', 'teacher'].includes(text(profile.Role || profile.role).toLowerCase()) && text(profile.Status || profile.status).toLowerCase() !== 'inactive') return { success: true, user: user(profile) };
     const indexedRoot = (await db.ref('authEmailIndex').orderByChild('Email').equalTo(email).once('value')).val() || {};
     const indexed = Object.values(indexedRoot)[0];
     if (indexed && indexed.UserID && text(indexed.Role || indexed.role).toLowerCase() === 'teacher' && text(indexed.Status || indexed.status).toLowerCase() !== 'inactive') {
@@ -1496,64 +1676,41 @@
   window.google = window.google || {}; window.google.script = window.google.script || {};
   window.google.script.run = new Proxy(base, { get(target, prop) { if (prop in target) return target[prop]; return (...args) => { const success = target._success; const failure = target._failure; target._success = target._failure = null; const name = String(prop); const request = isReadCall(prop) ? callReadWithRecovery(prop, args) : (name === 'saveStudent' || name === 'setStudentStatus' ? callWithWriteTimeout(prop, args) : call(prop, args)); request.then((value) => success && success(value)).catch((error) => failure && failure(error)); return target; }; } });
 })();
-
 </script>
-
-<script src="./supabase-auth-client.js?v=local"></script>
-<script>
-/* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
+<script>/* Supabase Auth facade used by the existing staff login flow. */
 (function () {
-  const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
-  const originalRun = window.google?.script?.run;
-  if (!originalRun) return;
-  const supabaseMethods = new Set(['loadScoresGrid', 'saveScoresBatch', 'getInitialDropdowns', 'getInitialSystemData', 'getDashboardStats', 'getCurrentUserProfile']);
-  const getAccessToken = async () => {
-    const supabase = window.__SUPABASE_CLIENT || window.supabase;
-    if (supabase?.auth?.getSession) {
-      const { data } = await supabase.auth.getSession();
-      if (data?.session?.access_token) return data.session.access_token;
-    }
-    const user = window.firebase?.auth?.().currentUser;
-    if (user) return user.getIdToken();
-    throw new Error('กรุณาเข้าสู่ระบบก่อนใช้งานคะแนน');
-  };
-  const request = async (action, payload) => {
-    const token = await getAccessToken();
-    const response = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` }, body:JSON.stringify({ action, ...payload }) });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success === false) {
-      console.error('Supabase API request failed', { action, status: response.status, message: result.message || '' });
-      throw new Error(result.message || `Supabase ${response.status}`);
-    }
-    console.info('Supabase API request succeeded', { action });
-    return result;
-  };
-  let success = null, failure = null;
-  const proxy = new Proxy({}, { get(_target, prop) {
-    if (prop === 'withSuccessHandler') return (fn) => { success = fn; return proxy; };
-    if (prop === 'withFailureHandler') return (fn) => { failure = fn; return proxy; };
-    if (supabaseMethods.has(String(prop))) return (payload) => {
-      const onSuccess = success, onFailure = failure; success = failure = null;
-      const method = String(prop);
-      const action = method === 'loadScoresGrid' ? 'load' : method === 'saveScoresBatch' ? 'save' : method === 'getDashboardStats' ? 'dashboard' : method === 'getCurrentUserProfile' ? 'profile' : 'bootstrap';
-      const input = method === 'getCurrentUserProfile' ? { email: window.__AUTH_EMAIL || window.__SUPABASE_AUTH_USER?.email || window.firebase?.auth?.().currentUser?.email || '' } : (payload || {});
-      request(action, input).then((value) => {
-        if (method === 'getInitialSystemData' && value && value.data) onSuccess && onSuccess(value);
-        else onSuccess && onSuccess(value);
-      }).catch((error) => onFailure && onFailure(error));
-      return proxy;
-    };
-    return (...args) => {
-      let runner = originalRun;
-      if (success) runner = runner.withSuccessHandler(success);
-      if (failure) runner = runner.withFailureHandler(failure);
-      success = failure = null;
-      return runner[prop](...args);
-    };
-  }});
-  window.google.script.run = proxy;
-})();
+  if (!window.__SUPABASE_CLIENT__) return;
 
+  function redirectToGoogle() {
+    const redirectTarget = new URL(window.location.href);
+    redirectTarget.hash = '';
+    const authorizeUrl = `${window.supabaseConfig.url}/auth/v1/authorize?provider=google&flow_type=implicit&redirect_to=${encodeURIComponent(redirectTarget.toString())}&prompt=select_account`;
+    window.location.assign(authorizeUrl);
+    return { success: false, redirecting: true };
+  }
+
+  window.firebaseSignInWithGoogle = async function () {
+    const supabase = window.__SUPABASE_CLIENT__;
+    const hash = String(window.location.hash || '');
+    const hasOAuthCallback = /(?:^|#|&)access_token=/.test(hash) || /(?:^|#|&)code=/.test(hash);
+    const bridgeUser = window.firebase && window.firebase.auth ? window.firebase.auth().currentUser : null;
+    const current = (supabase.auth && supabase.auth.currentUser) || bridgeUser;
+    // First click starts OAuth immediately; callback/restore resolves the session.
+    if (!current && !hasOAuthCallback) return redirectToGoogle();
+
+    const sessionResult = await supabase.auth.getSession();
+    const authUser = sessionResult.data?.session?.user || supabase.auth.currentUser;
+    if (!authUser) return redirectToGoogle();
+
+    const email = String(authUser.email || '').trim().toLowerCase();
+    const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
+    if (profileError) throw profileError;
+    if (match && ['admin', 'teacher', 'attendance_assistant'].includes(String(match.Role || match.role || '').toLowerCase()) && String(match.Status || match.status || '').toLowerCase() !== 'inactive') {
+      return { success: true, user: { id: match.UserID || match.userId || match.user_id, username: match.Username || match.username || email, name: match.Name || match.name || email, role: String(match.Role || match.role).toLowerCase(), email, imageUrl: authUser.user_metadata?.avatar_url || '', authUser } };
+    }
+    return { success: true, needsSetup: true, uid: authUser.id, email, name: authUser.user_metadata?.full_name || email };
+  };
+})();
 </script>
 </head>
 <body class="h-screen overflow-hidden text-slate-800">
@@ -1579,38 +1736,15 @@
                 <p class="text-sm font-semibold text-school-secondary">กลุ่มสาระสังคมศึกษา ศาสนาและวัฒนธรรม</p>
                 <p class="text-xs text-slate-500 mt-1">โรงเรียนวัดไร่ขิงวิทยา | ครูสุรเดช ธรรมประโชติ</p>
 
-                <form id="login-form" onsubmit="handleLogin(event)" class="mt-8 space-y-4 text-left">
-                    <div>
-                            <label class="text-xs font-bold text-slate-500 ml-1">เลขประจำตัวนักเรียน / ชื่อผู้ใช้ครู</label>
-                        <div class="relative">
-                            <i class="fa-solid fa-user absolute left-3 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="text" id="login-user" required 
-                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
-                                placeholder="นักเรียน: เลขประจำตัว | ครู: Username ที่ตั้งค่าไว้">
-                        </div>
-                    </div>
-             
-                    <div>
-                        <label class="text-xs font-bold text-slate-500 ml-1">รหัสผ่าน</label>
-                        <div class="relative">
-                            <i class="fa-solid fa-lock absolute left-3 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="password" id="login-pass" required 
-                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-school-primary/50 text-sm transition" 
-                                placeholder="ระบุรหัสผ่าน">
-                        </div>
-                    </div>
-                    
-                    <button type="submit" class="w-full bg-school-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-900 active:scale-95 transition flex items-center justify-center gap-2">
-                        <span>เข้าสู่ระบบ</span>
-                        <i class="fa-solid fa-arrow-right"></i>
+                <div id="login-form" class="mt-8 space-y-4 text-left">
+                    <button type="button" onclick="handleAdminGoogleLogin()" class="w-full bg-school-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-blue-900 active:scale-95 transition flex items-center justify-center gap-2">
+                        <i class="fa-brands fa-google text-red-500"></i><span>เข้าสู่ระบบครู/แอดมินด้วย Google</span>
                     </button>
-                    <button type="button" onclick="handleAdminGoogleLogin()" class="w-full border border-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-2">
-                        <i class="fa-brands fa-google text-red-500"></i><span>เข้าสู่ระบบแอดมินด้วย Google</span>
-                    </button>
-                </form>
+                    <p class="text-center text-xs text-slate-500">สำหรับครูและผู้ดูแลระบบเท่านั้น</p>
+                </div>
 
                 <div class="mt-6 text-[10px] text-slate-400 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                    <p><i class="fa-solid fa-circle-info mr-1"></i> นักเรียน: รหัสผ่านคือ <b>wrk</b> ตามด้วยเลขประจำตัว | ครู: ใช้ Username/Password จากเมนูตั้งค่า</p>
+                    <p><i class="fa-solid fa-circle-info mr-1"></i> กรุณาเข้าสู่ระบบด้วย Google ของครูหรือผู้ดูแลระบบที่ได้รับอนุมัติ</p>
                     <p class="mt-1 opacity-50 text-[9px]">ระบบสำหรับผู้มีสิทธิ์ใช้งานเท่านั้น</p>
                 </div>
             </div>
@@ -1781,7 +1915,18 @@ class DataController {
 
     rowTermMatches(rowTerm, targetTerm) {
         const target = this.normalizeTermValue(targetTerm, '');
-        const row = this.normalizeTermValue(rowTerm, '');
+        const rawRow = String(rowTerm == null ? '' : rowTerm).trim();
+        const termRows = Array.isArray(this.db && this.db.terms)
+            ? this.db.terms
+            : Object.values((this.db && this.db.terms) || {});
+        const mapped = termRows.find((record) => {
+            const termId = String(record && (record.TermID || record.termId || '')).trim();
+            const label = `${String(record && (record.TermNo || record.termNo || '')).trim()}/${String(record && (record.AcademicYear || record.academicYear || '')).trim()}`;
+            return rawRow && (rawRow === termId || rawRow === label);
+        });
+        const row = mapped
+            ? this.normalizeTermValue(`${mapped.TermNo || mapped.termNo}/${mapped.AcademicYear || mapped.academicYear}`, '')
+            : this.normalizeTermValue(rawRow, '');
         if (!target) return true;
         if (!row) return true;
         return row === target;
@@ -2085,7 +2230,9 @@ class DataController {
         const key = `${normalizedTerm}_${date}_${subject}_${studentId}`;
         
         this.db.attendance[key] = {
-            status: status || (this.db.attendance[key] ? this.db.attendance[key].status : 'มา'),
+            status: status !== undefined && status !== null
+                ? status
+                : (this.db.attendance[key] ? this.db.attendance[key].status : 'มา'),
             note: note !== undefined ? note : (this.db.attendance[key] ? this.db.attendance[key].note : ''),
             recorder: (window.CURRENT_USER ? window.CURRENT_USER.name : 'Me') + ' (Local)',
             timestamp: new Date().toISOString()
@@ -2214,6 +2361,7 @@ var DATA_CONTROLLER = new DataController();
         .sc-score-export-group .sc-action-text { display: none; }
         .sc-score-legend { grid-column: 1 / -1; margin: 0; justify-content: center; }
     }
+
     .content-tab > .bg-white { border-color: #e1e7ff !important; box-shadow: 0 10px 28px rgba(71, 85, 105, .07) !important; }
     .content-tab input:focus, .content-tab select:focus, .content-tab textarea:focus { border-color: #818cf8 !important; box-shadow: 0 0 0 4px rgba(129, 140, 248, .16) !important; }
     #sync-status { border-color: #bae6fd !important; background: linear-gradient(90deg, #ecfeff, #eef2ff) !important; }
@@ -2664,7 +2812,7 @@ var DATA_CONTROLLER = new DataController();
                     <button onclick="ATTENDANCE_MANAGER.saveAll()" id="btn-att-save-all" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2 text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100">
                         <i class="fa-solid fa-floppy-disk"></i> บันทึกทั้งหมด
                     </button>
-                    <button onclick="printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
+                    <button type="button" onclick="printSystem('attendance')" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2"><i class="fa-solid fa-print"></i> พิมพ์</button>
                 </div>
             </div>
 
@@ -2694,22 +2842,6 @@ var DATA_CONTROLLER = new DataController();
                 </div>
             </div>
 
-            <div id="att-assistant-panel" class="hidden bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <div class="flex flex-wrap gap-3 items-end">
-                    <div class="min-w-[220px]">
-                        <label class="text-xs font-bold text-slate-400 mb-1 block uppercase">นักเรียนผู้ช่วยเช็คชื่อ</label>
-                        <select id="att-assistant-student" class="w-full border border-slate-200 rounded-xl p-2 text-sm bg-white outline-none focus:ring-2 ring-school-primary/20"></select>
-                    </div>
-                    <button id="btn-att-assistant-save" onclick="saveAttendanceAssistant()" class="btn-blue-primary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-user-check"></i> กำหนดผู้ช่วย
-                    </button>
-                    <button onclick="copyAttendanceAssistantLink()" class="btn-blue-secondary px-4 py-2 rounded-xl font-bold shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-link"></i> คัดลอกลิงก์หน้าเช็คชื่อ
-                    </button>
-                </div>
-                <div id="att-assistant-list" class="mt-4 text-sm text-slate-500">ยังไม่มีผู้ช่วยเช็คชื่อในเงื่อนไขนี้</div>
-                <p class="mt-3 text-xs text-slate-400">ผู้ช่วยเข้าใช้ด้วย เลขประจำตัวนักเรียน / รหัสผ่านเป็นเลขประจำตัวนักเรียน</p>
-            </div>
         </div>
 
         <!-- TAB: SCORES -->
@@ -2728,6 +2860,7 @@ var DATA_CONTROLLER = new DataController();
                     <div class="sc-score-context-badge"><i class="fa-solid fa-database text-cyan-600"></i><span>ข้อมูลคะแนนของห้องที่เลือก</span></div>
                 </div>
                 <div class="sc-score-toolbar-divider"></div>
+                <div id="sc-orphan-warning" class="hidden mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status"></div>
                 <div class="sc-score-actions">
                     <div class="sc-score-action-group sc-score-manage-group"><span class="sc-score-action-label">จัดการคอลัมน์</span><div class="sc-score-action-buttons">
                         <button type="button" onclick="SCORES_MANAGER.openAddModal()" class="btn-blue-primary px-4 py-2 rounded-lg text-sm font-bold shadow-md flex items-center gap-2"><i class="fa-solid fa-plus"></i> เพิ่มงาน/สอบ</button>
@@ -2787,7 +2920,7 @@ var DATA_CONTROLLER = new DataController();
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
                     <button onclick="toggleNativeGradingAssignments()" id="grading-raw-toggle" class="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-list-check mr-1"></i>แสดงคะแนนงาน</button>
                     <button onclick="openNativeSGSModal()" class="bg-pink-50 text-pink-700 border border-pink-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-table-list mr-1"></i>ข้อมูลลง SGS</button>
-                    <button onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
+                    <button type="button" onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
                     <button onclick="saveNativeGradingData()" id="grading-save-btn" class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow"><i class="fa-solid fa-floppy-disk mr-1"></i>บันทึกเกรด</button>
                 </div>
             </div>
@@ -2850,7 +2983,6 @@ var DATA_CONTROLLER = new DataController();
                             <option value="">ทุกสิทธิ์ (All Roles)</option>
                             <option value="admin">ผู้ดูแลระบบ (Admin)</option>
                             <option value="teacher">ครูผู้สอน (Teacher)</option>
-                            <option value="student">นักเรียน (Student)</option>
                         </select>
                         <select id="usr-filter-status" onchange="filterUsers()" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 ring-school-primary/20">
                             <option value="">ทุกสถานะ (All Status)</option>
@@ -3091,8 +3223,9 @@ var DATA_CONTROLLER = new DataController();
                 <select id="st-input-status" class="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-white outline-none focus:border-school-primary focus:ring-2 focus:ring-school-primary/20">
                     <option value="Active">กำลังเรียน (Active)</option>
                     <option value="Inactive">ลาออกแล้ว (Inactive)</option>
+                    <option value="พักการเรียน">พักการเรียน</option>
                 </select>
-                <p class="mt-1 text-[11px] text-slate-400">เมื่อตั้งเป็นลาออก แถวคะแนนจะถูกล็อก แต่คะแนนเดิมยังคงอยู่</p>
+                <p class="mt-1 text-[11px] text-slate-400">เมื่อตั้งเป็นลาออกหรือพักการเรียน แถวคะแนนและเช็คชื่อจะถูกล็อก แต่ข้อมูลเดิมยังคงอยู่</p>
             </div>
             <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-slate-100">
                 <button type="button" onclick="closeModal('student-modal')" class="px-5 py-2.5 text-slate-500 hover:bg-slate-50 rounded-xl text-sm font-bold transition">ยกเลิก</button>
@@ -3215,7 +3348,6 @@ var DATA_CONTROLLER = new DataController();
                     <select id="usr-role" class="w-full border border-slate-200 rounded-xl p-2.5 text-sm bg-white outline-none focus:border-school-primary focus:ring-2 focus:ring-school-primary/20">
                         <option value="admin">ผู้ดูแลระบบ (Admin)</option>
                         <option value="teacher">ครูผู้สอน (Teacher)</option>
-                        <option value="student">นักเรียน (Student)</option>
                     </select>
                 </div>
                 <div><label class="text-xs font-bold text-slate-500 mb-1 block">สถานะ</label>
@@ -3443,7 +3575,7 @@ var DATA_CONTROLLER = new DataController();
         }
 
         queueStorageKey() {
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const localUser = (typeof CURRENT_USER !== 'undefined') ? CURRENT_USER : null;
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
@@ -3508,13 +3640,12 @@ var DATA_CONTROLLER = new DataController();
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
             if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
             const role = String(CURRENT_USER.role || '').toLowerCase();
-            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-            return role !== 'admin' || adminEmails.includes(authEmail);
+            return role !== 'admin' || authEmail === 'suradet.t@wrk.ac.th';
         }
 
         attendanceKey(payload) {
@@ -4893,7 +5024,7 @@ var DATA_CONTROLLER = new DataController();
             if (!Number.isFinite(n)) return '';
             return Math.max(0, Math.min(Math.round(n), Number(maxScore) || 0));
         };
-        const isStudentInactive = (student) => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
+        const isStudentInactive = (student) => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
         const setScoreControlsLocked = (locked) => {
             if (els.tbody) els.tbody.querySelectorAll('input,button').forEach(el => { el.disabled = !!locked; });
             const saveAll = getEl('btn-sc-save-all'); if (saveAll) saveAll.disabled = !!locked || _saveAllInProgress;
@@ -4960,7 +5091,7 @@ var DATA_CONTROLLER = new DataController();
 
         const fetchData = (retry = 0, options = {}) => {
             const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase());
-            const authUser = window.__SUPABASE_AUTH_USER || ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null);
+            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
             const authPending = staffRole && (!authUser || authUser.isAnonymous) && window.__AUTH_READY_STATE !== 'missing';
             if (authPending && !options.skipAuthWait) {
                 clearScoreView('กำลังยืนยันบัญชีเพื่อโหลดข้อมูลคะแนน...');
@@ -5015,7 +5146,7 @@ var DATA_CONTROLLER = new DataController();
             clearScoreView('กำลังโหลดรายชื่อนักเรียนและคะแนน...');
             setLoading(true);
             setScoreControlsLocked(true);
-            if (typeof window.firebaseSubscribeScoreGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
+            if (typeof window.firebaseSubscribeScoreGrid === 'function') {
                 const requestId = ++activeServerRequestId;
                 activeServerRequestKey = requestKey;
                 realtimeUnsubscribe = window.firebaseSubscribeScoreGrid({ subject, subjectCode: subject, level, room, term }, (res) => {
@@ -5115,7 +5246,7 @@ var DATA_CONTROLLER = new DataController();
                     activeServerRequestKey = '';
                     setLoading(false);
                     setScoreControlsLocked(false);
-                    console.log('SCORE_SERVER_RESPONSE students=' + (res && res.data && res.data.students ? res.data.students.length : 0) + ' assignments=' + (res && res.data && res.data.assignments ? res.data.assignments.length : 0) + ' scoreKeys=' + (res && res.data && res.data.scores ? Object.keys(res.data.scores).length : 0));
+                    console.log('SCORE_SERVER_RESPONSE students=' + (res && res.data && res.data.students ? res.data.students.length : 0) + ' assignments=' + (res && res.data && res.data.assignments ? res.data.assignments.length : 0) + ' scoreKeys=' + (res && res.data && res.data.scores ? Object.keys(res.data.scores).length : 0) + ' orphanScores=' + (res && res.data && res.data.orphanScores ? res.data.orphanScores.length : 0));
                     if (res && res.success && res.data) {
                         const receivedContext = scoreContextKey(res.data.term || term, res.data.subject || subject, level, room);
                         if (receivedContext !== requestKey) {
@@ -5128,6 +5259,18 @@ var DATA_CONTROLLER = new DataController();
                             return;
                         }
                         updateState(res.data);
+                        const orphanWarning = document.getElementById('sc-orphan-warning');
+                        const orphanRows = Array.isArray(res.data.orphanScores) ? res.data.orphanScores : [];
+                        if (orphanWarning) {
+                            if (orphanRows.length) {
+                                const ids = [...new Set(orphanRows.map(row => row.assignmentId).filter(Boolean))].slice(0, 4).join(', ');
+                                orphanWarning.textContent = `พบคะแนน ${orphanRows.length} รายการที่ยังไม่พบงานต้นทาง (${ids || 'ไม่ทราบ AssignmentID'}) ระบบจะไม่ลบหรือเขียนทับคะแนนเหล่านี้ กรุณาตรวจ mapping ก่อนแก้ไข`;
+                                orphanWarning.classList.remove('hidden');
+                            } else {
+                                orphanWarning.textContent = '';
+                                orphanWarning.classList.add('hidden');
+                            }
+                        }
                         _loadedContextKey = requestKey;
                         const readbackFailures = verifyExpected ? verifyReadback(verifyExpected, res.data.scores) : [];
                         if (verifyExpected) {
@@ -5175,7 +5318,7 @@ var DATA_CONTROLLER = new DataController();
                     if (!retryTransientRead()) renderEmptyState("เชื่อมต่อ Server ไม่ได้ กรุณาตรวจสอบการเชื่อมต่อ");
                 };
             const scoreRequest = { subject: subject, subjectCode: subject, level: level, room: room, term: term, user: CURRENT_USER };
-            if (typeof window.firebaseLoadScoresGrid === 'function' && !window.__SUPABASE_AUTH_USER) {
+            if (typeof window.firebaseLoadScoresGrid === 'function') {
                 window.firebaseLoadScoresGrid(scoreRequest).then(handleScoreLoadSuccess).catch(handleScoreLoadFailure);
             } else {
                 google.script.run
@@ -5809,10 +5952,7 @@ var DATA_CONTROLLER = new DataController();
             }
 
             if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = html; 
-            // Keep the call in the click handler. A delayed window.print() can
-            // be ignored by browsers after the user activation has expired.
-            document.documentElement.offsetHeight;
-            window.print();
+            setTimeout(() => window.print(), 500);
         };
 
         const downloadImage = () => {
@@ -6393,7 +6533,7 @@ var DATA_CONTROLLER = new DataController();
         const render = () => {
             let html = '';
             state.students.forEach(s => {
-                const inactive = ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(s.status || s.Status || '').trim().toLowerCase());
+                const inactive = ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(s.status || s.Status || '').trim().toLowerCase());
                 const hasStatus = s.attStatus !== undefined && s.attStatus !== null && String(s.attStatus).trim() !== '';
                 const status = hasStatus ? String(s.attStatus) : '';
                 const statusOptions = [ { val: 'มา', color: 'green', label: 'มา' }, { val: 'สาย', color: 'yellow', label: 'สาย' }, { val: 'ลา', color: 'blue', label: 'ลา' }, { val: 'ขาด', color: 'red', label: 'ขาด' } ];
@@ -6402,8 +6542,10 @@ var DATA_CONTROLLER = new DataController();
                 statusOptions.forEach(opt => {
                     const isChecked = (status === opt.val) ? 'checked' : '';
                     let bgClass = `peer-checked:bg-${opt.color}-500`; if(opt.color === 'yellow') bgClass = `peer-checked:bg-yellow-400`;
+                    const selectedClass = '';
+                    const selectedStyle = '';
                     // Add onclick handler for auto-sync (fires even if already selected)
-                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกแล้ว ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
+                    buttonsHtml += `<label class="flex-1 relative ${inactive ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}" ${inactive ? 'title="นักเรียนลาออกหรือพักการเรียน ไม่สามารถเช็คชื่อได้"' : `onclick="ATTENDANCE_MANAGER.updateStatus('${s.id}', '${opt.val}')"`}><input type="radio" name="status-${s.id}" value="${opt.val}" class="peer hidden" ${isChecked} ${inactive ? 'disabled' : ''}><div class="py-1.5 text-center text-xs font-bold rounded-md transition-all duration-200 text-slate-400 ${inactive ? 'bg-slate-200' : `group-hover:bg-slate-200 ${bgClass} peer-checked:text-white`} z-0">${opt.label}</div></label>`;
                 });
                 buttonsHtml += `</div>`;
 
@@ -6413,12 +6555,14 @@ var DATA_CONTROLLER = new DataController();
                     infoHtml = `<div class="flex items-center gap-1.5 text-[10px] font-bold text-orange-500 animate-pulse"><i class="fa-solid fa-cloud-arrow-up"></i> Waiting Sync</div>`;
                 } else if (s.attRecorder) {
                     let time = s.attTime ? formatThaiDateTime(s.attTime, { newline: true }) : ''; 
-                    infoHtml = `<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">${s.attRecorder}</span></div><div class="text-[10px] text-slate-400 mt-1 leading-tight">${time}</div></div>`;
+                    infoHtml = `<div class="flex flex-col text-xs"><div class="font-bold text-slate-700">บันทึก: <span class="font-normal text-slate-600">${s.attRecorder}</span></div><div class="text-[10px] ${hasStatus ? 'text-green-500' : 'text-slate-400'} mt-1 leading-tight">${time}</div></div>`;
                 } else if (hasStatus) { infoHtml = '<div class="text-xs text-amber-600">รอบันทึก</div>'; }
                 else { infoHtml = '<div class="text-xs text-slate-400">ยังไม่เช็ก</div>'; }
 
                 const studentName = `${s.prefix || ''}${getStudentFirstName(s)} ${getStudentLastName(s)}`.trim();
-                const inactiveBadge = inactive ? '<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-lock"></i> ลาออกแล้ว</span>' : '';
+                const statusRaw = String(s.status || s.Status || '').trim().toLowerCase();
+                const statusBadge = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(statusRaw) ? 'พักการเรียน' : 'ลาออกแล้ว';
+                const inactiveBadge = inactive ? `<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-lock"></i> ${statusBadge}</span>` : '';
                 html += `<tr class="${inactive ? 'bg-slate-100 text-slate-500' : 'hover:bg-slate-50'} border-b transition-colors ${pending ? 'bg-orange-50/30' : ''}"><td class="p-4 text-slate-500">${s.no}</td><td class="p-4 text-xs font-mono text-slate-400">${s.id}</td><td class="p-4 font-bold">${studentName}${inactiveBadge}</td><td class="p-4 text-center">${buttonsHtml}</td><td class="p-4"><input class="att-note w-full text-xs p-2 border border-transparent hover:border-slate-200 rounded-lg focus:border-school-primary focus:bg-white bg-transparent outline-none transition" value="${s.attNote||''}" placeholder="หมายเหตุ..." ${inactive ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ไขได้"' : `oninput="ATTENDANCE_MANAGER.updateNote('${s.id}', this.value)"`}></td><td id="att-info-${s.id}" class="p-4 border-l border-slate-50">${infoHtml}</td></tr>`;
             });
             els.tbody.innerHTML = html;
@@ -6426,7 +6570,7 @@ var DATA_CONTROLLER = new DataController();
 
         const updateStatus = (id, newStatus) => {
             const targetStudent = state.students.find(s => String(s.id) === String(id));
-            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
+            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
             if (_saveAllInProgress) {
                 console.warn('ATTENDANCE_UPDATE_BLOCKED reason=saveAll_in_progress', id, newStatus);
                 if (typeof Swal !== 'undefined') Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังบันทึกทั้งห้อง', text: 'รอบันทึกเสร็จก่อน แล้วจึงแก้ไขต่อ', showConfirmButton: false, timer: 1800 });
@@ -6468,7 +6612,7 @@ var DATA_CONTROLLER = new DataController();
 
         const updateNote = (id, note) => {
             const targetStudent = state.students.find(s => String(s.id) === String(id));
-            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
+            if (targetStudent && ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(targetStudent.status || targetStudent.Status || '').trim().toLowerCase())) return;
             if (_saveAllInProgress) {
                 console.warn('ATTENDANCE_NOTE_BLOCKED reason=saveAll_in_progress', id);
                 if (typeof Swal !== 'undefined') Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังบันทึกทั้งห้อง', text: 'รอบันทึกเสร็จก่อน แล้วจึงแก้ไขต่อ', showConfirmButton: false, timer: 1800 });
@@ -6884,8 +7028,10 @@ var DATA_CONTROLLER = new DataController();
                 printStyleEl.innerHTML = `@media print { @page { size: portrait; margin: 10mm; } }`;
             }
 
-            if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML; setTimeout(() => window.print(), 500);
+            if(document.getElementById('print-content-root')) document.getElementById('print-content-root').innerHTML = tableHTML;
+            setTimeout(() => window.print(), 500);
         }
+        return false;
     }
 
     // Other Functions ...
@@ -6906,7 +7052,7 @@ var DATA_CONTROLLER = new DataController();
 
     function isStudentInactive(studentRecord) {
         const raw = String(studentRecord && (studentRecord.status ?? studentRecord.Status) || '').trim().toLowerCase();
-        return ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(raw);
+        return ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(raw);
     }
 
     function inferStudentIconClass(prefix, icon) {
@@ -6978,7 +7124,8 @@ var DATA_CONTROLLER = new DataController();
             const iconClass = inferStudentIconClass(s.prefix, s.icon);
             const iconDisplay = `<i class="fa-solid ${iconClass}"></i>`;
             const inactive = isStudentInactive(s);
-            const statusLabel = inactive ? 'ลาออกแล้ว' : 'Active';
+            const rawStatus = String(s.status ?? s.Status ?? '').trim().toLowerCase();
+            const statusLabel = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(rawStatus) ? 'พักการเรียน' : (inactive ? 'ลาออกแล้ว' : 'Active');
             const statusClass = inactive ? 'bg-slate-100 text-slate-600 border-slate-300' : 'bg-green-100 text-green-700 border-green-200';
             const statusIcon = inactive ? '<i class="fa-solid fa-lock"></i>' : '<div class="w-1.5 h-1.5 bg-green-500 rounded-full"></div>';
             // ป้องกัน ID มีเครื่องหมายแปลกๆ
@@ -7236,7 +7383,10 @@ var DATA_CONTROLLER = new DataController();
         getEl('st-input-last').value = getStudentLastName(s); 
         getEl('st-input-level').value = s.level; 
         getEl('st-input-room').value = s.room; 
-        getEl('st-input-status').value = isStudentInactive(s) ? 'Inactive' : 'Active';
+        const rawStatus = String(s.status ?? s.Status ?? '').trim().toLowerCase();
+        getEl('st-input-status').value = ['พักการเรียน', 'พักเรียน', 'suspended'].includes(rawStatus)
+            ? 'พักการเรียน'
+            : (isStudentInactive(s) ? 'Inactive' : 'Active');
     }
     
     // [MODIFIED] Optimistic Save Student
@@ -7267,7 +7417,10 @@ var DATA_CONTROLLER = new DataController();
         const localStudents = []
             .concat(typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.students) ? DATA_CONTROLLER.db.students : [])
             .concat(Array.isArray(window.CURRENT_STUDENT_LIST) ? window.CURRENT_STUDENT_LIST : []);
-        const existingStudent = localStudents.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim() && normalizeTerm(s.term || s.Term || term) === normalizeTerm(term));
+        const studentTermMatches = s => typeof DATA_CONTROLLER !== 'undefined' && typeof DATA_CONTROLLER.rowTermMatches === 'function'
+            ? DATA_CONTROLLER.rowTermMatches(s.term || s.Term || term, term)
+            : normalizeTerm(s.term || s.Term || term) === normalizeTerm(term);
+        const existingStudent = localStudents.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim() && studentTermMatches(s));
         const sameStudentField = (left, right) => String(left == null ? '' : left).trim() === String(right == null ? '' : right).trim();
         const statusChanged = existingStudent && String(existingStudent.status ?? existingStudent.Status ?? '').trim().toLowerCase() !== String(d.status).trim().toLowerCase();
         const statusOnly = !!(statusChanged &&
@@ -7284,15 +7437,27 @@ var DATA_CONTROLLER = new DataController();
         // 2. Optimistic UI Update (Update DATA_CONTROLLER & Render immediately)
         if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
             if (!DATA_CONTROLLER.db.students) DATA_CONTROLLER.db.students = [];
-            const idx = DATA_CONTROLLER.db.students.findIndex(s => String(s.id).trim() === String(d.id).trim() && normalizeTerm(s.term) === term);
+            const idx = DATA_CONTROLLER.db.students.findIndex(s => String(s.id).trim() === String(d.id).trim() && studentTermMatches(s));
             if (idx > -1) { 
                 DATA_CONTROLLER.db.students[idx] = { ...DATA_CONTROLLER.db.students[idx], ...d }; 
             } else { 
                 DATA_CONTROLLER.db.students.push(d); 
             }
             DATA_CONTROLLER.saveToStorage();
-            loadStudents(); // อัปเดตตารางบนหน้าจอทันที
         }
+
+        // Paint the edited row directly. The realtime listener can briefly
+        // deliver its previous snapshot while the write is being confirmed;
+        // the local UI must still show the user's successful change now.
+        const updateVisibleStudent = (list) => {
+            if (!Array.isArray(list)) return;
+            const visible = list.find(s => String(s.id || s.studentId || s.StudentID).trim() === String(d.id).trim());
+            if (visible) {
+                Object.assign(visible, d);
+                _renderStudents(list, false);
+            }
+        };
+        updateVisibleStudent(window.CURRENT_STUDENT_LIST);
 
         // 3. Write the status immediately so the realtime score tab receives
         // the Firebase snapshot without waiting for the background queue.
@@ -7308,6 +7473,7 @@ var DATA_CONTROLLER = new DataController();
         const writeCall = google.script.run
             .withSuccessHandler(res => {
                 if (!res || res.success === false) return queueStudentFallback(res && res.message);
+                loadStudents();
                 SYNC_ENGINE.updateUI('synced');
                 Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'บันทึกสถานะเรียบร้อย', showConfirmButton: false, timer: 1500 });
             })
@@ -9159,9 +9325,11 @@ var DATA_CONTROLLER = new DataController();
     // Native grading module: uses the same Firebase bridge as the main system.
     window.NATIVE_GRADING = window.NATIVE_GRADING || { data: null, dirty: {}, base: {}, settingsDirty: false, showAssignments: false, history: [], future: [], focus: null, saving: false, autosaveTimer: null, revision: 0, saveQueued: false, retryCount: 0, loadSeq: 0, realtimeUnsubscribe: null, realtimeKey: '', realtimePending: null };
     function gradingEsc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+    function gradingNumericPart(value) { const match = String(value == null ? '' : value).match(/\d+(?:\.\d+)?/); return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER; }
     function gradingFillSelect(id, items, selected, label) {
         const el = getEl(id); if (!el) return;
         const values = (items || []).map(x => typeof x === 'object' ? { value: x.value || x.termId || x.code || '', label: label ? label(x) : (x.label || x.name || x.value || x.termId || x.code) } : { value: x, label: x }).filter(x => x.value !== '');
+        if (id === 'grading-level') values.sort((a,b) => gradingNumericPart(a.value) - gradingNumericPart(b.value) || String(a.value).localeCompare(String(b.value), 'th'));
         if (id === 'grading-room') values.sort((a,b) => (parseInt(a.value, 10) || 0) - (parseInt(b.value, 10) || 0) || String(a.value).localeCompare(String(b.value), 'th'));
         el.innerHTML = values.map(x => `<option value="${gradingEsc(x.value)}">${gradingEsc(x.label)}</option>`).join('');
         if (selected && values.some(x => String(x.value) === String(selected))) el.value = selected;
@@ -9215,7 +9383,7 @@ var DATA_CONTROLLER = new DataController();
     async function copyNativeSGSTable(id) { const table = getEl(id); if (!table) return; const rows = [...table.querySelectorAll('tr:not(.native-sgs-control-row)')].map(row => [...row.children].map(cell => cell.innerText.trim()).join('\t')).join('\n'); let copied = false; try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(rows); copied = true; } } catch (e) {} if (!copied) { const area = document.createElement('textarea'); area.value = rows; area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.focus(); area.select(); try { copied = document.execCommand('copy'); } catch (e) {} area.remove(); } gradingSetStatus(copied ? `คัดลอกตารางแล้ว ${rows.split('\n').length} แถว ไปยัง Clipboard` : 'คัดลอกไม่สำเร็จ กรุณาอนุญาต Clipboard ของ Chrome', copied ? 'success' : 'error'); }
     function setNativeGradingDirty(sid, component, value) {
         const student = (window.NATIVE_GRADING.data?.students || []).find(item => String(item.id) === String(sid));
-        if (['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase())) return;
+        if (['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase())) return;
         window.NATIVE_GRADING.dirty[sid] = window.NATIVE_GRADING.dirty[sid] || {};
         window.NATIVE_GRADING.dirty[sid][component] = value;
         window.NATIVE_GRADING.revision = (window.NATIVE_GRADING.revision || 0) + 1;
@@ -9242,17 +9410,55 @@ var DATA_CONTROLLER = new DataController();
         const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : {};
         const role = String(CURRENT_USER?.role || '').toLowerCase();
         const teacherId = String(CURRENT_USER?.id || '');
-        const allClasses = boot.teacherClasses || liveDb.teacherClasses || [];
-        const scopedClasses = role === 'admin' ? allClasses : allClasses.filter(c => !teacherId || String(c.teacherId || c.TeacherID || '') === teacherId);
+        // Prefer a populated bootstrap scope, but do not let an empty/stale
+        // bootstrap array hide the realtime class permissions.
+        // Bootstrap may contain only the last class returned by the settings
+        // endpoint. Merge it with the shared realtime snapshot so grading,
+        // attendance and student tabs see the same permission database.
+        const rows = value => Array.isArray(value) ? value : Object.values(value || {});
+        const classSources = []
+            .concat(rows(boot.teacherClasses))
+            .concat(rows(liveDb.teacherClasses))
+            .concat(rows(liveDb.combos))
+            // Local Test exposes the exact backup snapshot. This fallback is
+            // local-only; production continues to use Firebase bootstrap and
+            // realtime data above.
+            .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.teacherClasses) : []);
+        const allClasses = [...new Map(classSources.map(c => {
+            const key = [c.teacherId || c.TeacherID || '', c.subjectCode || c.SubjectCode || c.subject || '', c.level || c.Level || '', c.room || c.Room || ''].join('|');
+            return [key, c];
+        })).values()];
+        const termMatchesClass = c => {
+            const raw = String(c.termId || c.TermID || c.term || c.Term || '').trim();
+            return !raw || normalizeTermForUI(raw) === normalizeTermForUI(selectedTerm);
+        };
+        const termClasses = allClasses.filter(termMatchesClass);
+        const usableClasses = termClasses.length ? termClasses : allClasses;
+        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || String(c.teacherId || c.TeacherID || '') === teacherId));
         const classSubject = c => String(c.subjectCode || c.SubjectCode || c.subject || '');
         const classLevel = c => String(c.level || c.Level || '');
         const classRoom = c => String(c.room || c.Room || '');
         const scopedSubjectCodes = new Set(scopedClasses.map(classSubject).filter(Boolean));
-        const subjects = (window.SUBJECTS_CACHE || (boot.subjects || liveDb.subjects || [])).filter(s => role === 'admin' || scopedSubjectCodes.has(String(s.code || s.subjectCode || '')));
+        const subjectSource = rows(window.SUBJECTS_CACHE).length
+            ? rows(window.SUBJECTS_CACHE)
+            : (rows(boot.subjects).length ? rows(boot.subjects) : rows(liveDb.subjects));
+        const subjects = subjectSource.filter(s => role === 'admin' || scopedSubjectCodes.has(String(s.code || s.subjectCode || '')));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code || s.subjectCode, label: `${s.code || s.subjectCode} ${s.name || s.subjectName || ''}` })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
-        const subjectClasses = scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
+        const studentSources = []
+            .concat(rows(liveDb.students))
+            .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.students) : []);
+        const adminStudentClasses = [...new Map(studentSources.map(s => {
+            const level = String(s.level || s.Level || '').trim();
+            const room = String(s.room || s.Room || '').trim();
+            return [`${level}|${room}`, { level, room }];
+        }).filter(([, value]) => value.level && value.room))].map(([, value]) => value);
+        // Admins can inspect every class represented by the shared student
+        // database. Teachers remain restricted to their configured classes.
+        const subjectClasses = role === 'admin'
+            ? adminStudentClasses
+            : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))];
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
@@ -9266,7 +9472,7 @@ var DATA_CONTROLLER = new DataController();
         const assignmentHeaders = showAssignments ? assignments.map(a => `<th class="p-2 text-center bg-amber-50 text-amber-800 whitespace-nowrap" title="${gradingEsc(a.title)}">${gradingEsc(String(a.title || '').split(':::')[0] || a.id)}<br><span class="text-[10px]">เต็ม ${gradingEsc(a.maxScore)}</span></th>`).join('') : '';
         head.innerHTML = `<tr><th class="p-3 text-left">เลขที่</th><th class="p-3 text-left">รหัส</th><th class="p-3 text-left min-w-[210px]">ชื่อ-สกุล</th>${assignmentHeaders}<th class="p-3 text-center">ภาพรวมงาน</th><th class="p-3 text-center bg-blue-50">ก่อนกลางภาค</th><th class="p-3 text-center bg-purple-50">กลางภาค</th><th class="p-3 text-center bg-blue-50">หลังกลางภาค</th><th class="p-3 text-center bg-purple-50">ปลายภาค</th><th class="p-3 text-center bg-slate-800 text-white">รวม</th><th class="p-3 text-center bg-green-500 text-white">เกรด</th><th class="p-3 text-center bg-orange-50 text-orange-700">คุณลักษณะ</th><th class="p-3 text-center bg-teal-50 text-teal-700">อ่าน/คิด</th></tr>`;
         if (!data.students?.length) { body.innerHTML = `<tr><td colspan="${10 + (showAssignments ? assignments.length : 0)}" class="p-8 text-center text-slate-400">ไม่พบข้อมูลนักเรียนในเงื่อนไขนี้</td></tr>`; return; }
-        const isInactive = student => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
+        const isInactive = student => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
         const cell = (sid, component, max=100, locked=false) => { const value = nativeGradeValue(sid, component); return `<input data-grade-student="${gradingEsc(sid)}" data-grade-component="${component}" value="${gradingEsc(value)}" type="number" min="0" max="${max}" ${locked ? 'disabled title="นักเรียนลาออกแล้ว ไม่สามารถแก้ตัดเกรดได้"' : ''} class="grade-native-input w-20 text-center border rounded-lg px-2 py-1 focus:ring-2 focus:ring-indigo-200 ${locked ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : nativeScoreClass(value, max)}">`; };
         body.innerHTML = data.students.map(s => {
             const submitted = assignments.reduce((n, a) => n + (scores[`${a.id}_${s.id}`]?.isSubmitted ? 1 : 0), 0);
@@ -9303,7 +9509,13 @@ var DATA_CONTROLLER = new DataController();
             }
             grading.data = payload; LocalStore.set(cacheKey, payload); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(payload.exams || {})); grading.history = [nativeSnapshot()]; grading.future = [];
             const s = payload.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value;
-            renderNativeGradingTable(payload); gradingSetStatus(`${sourceLabel || 'โหลดแล้ว'} ${payload.students?.length || 0} คน | งาน ${payload.assignments?.length || 0} รายการ`, 'success');
+            renderNativeGradingTable(payload);
+            const studentCount = payload.students?.length || 0;
+            const assignmentCount = payload.assignments?.length || 0;
+            const status = assignmentCount
+                ? `${sourceLabel || 'โหลดแล้ว'} ${studentCount} คน | งาน ${assignmentCount} รายการ`
+                : `${sourceLabel || 'โหลดแล้ว'} ${studentCount} คน | ยังไม่มีงานในวิชา/ห้องนี้ของเทอม ${filter.term}`;
+            gradingSetStatus(status, assignmentCount ? 'success' : 'info');
         };
         if (typeof window.firebaseSubscribeGradingData === 'function' && !forceServer) {
             if (grading.realtimeKey === cacheKey && grading.realtimePending && !gradingHasPendingEdits()) {
@@ -9396,1121 +9608,6 @@ var DATA_CONTROLLER = new DataController();
 </script>
  
         </div>
-        <div id="container-student" class="hidden h-full">
-            <!DOCTYPE html>
-<html lang="th">
-<head>
-  <meta charset="UTF-8">
-  <!-- PWA & Mobile Viewport Settings (Optimized) -->
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="EduVerse">
-  <meta name="theme-color" content="#2563EB">
-  <title>EduVerse Connect</title>
-  
-  <!-- Font: Prompt -->
-  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- SweetAlert2 -->
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-  <style>
-    :root {
-      --primary: #2563EB;      /* Royal Blue */
-      --primary-dark: #1E3A8A; /* Navy */
-      --accent: #F97316;       /* Orange */
-      --accent-secondary: #10B981; /* Green */
-      
-      --bg-app: #F3F4F6;      
-      --bg-white: #FFFFFF;
-      --text-main: #1F2937;
-      --text-sub: #6B7280;
-      
-      --card-radius: 24px;
-      --nav-height: 75px;
-      
-      /* Safe Area Variables for iPhone Notch */
-      --sat: env(safe-area-inset-top);
-      --sab: env(safe-area-inset-bottom);
-    }
-
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-    /* --- CRITICAL SCROLL FIX (FIXED SHELL) --- */
-    html, body {
-      height: 100%;
-      width: 100%;
-      margin: 0; padding: 0;
-      overflow: hidden; /* Lock the viewport completely */
-      position: fixed; /* Prevent body scroll bounce on iOS */
-      background-color: var(--bg-app);
-      font-family: 'Prompt', sans-serif;
-      color: var(--text-main);
-    }
-
-    /* --- Notification Toast --- */
-    #toast {
-      position: fixed; top: calc(20px + var(--sat)); left: 50%; transform: translate(-50%, -200%);
-      background: rgba(30, 58, 138, 0.95); color: white;
-      padding: 10px 20px; border-radius: 30px; z-index: 9999;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      font-size: 0.9rem; display: flex; align-items: center; gap: 10px; white-space: nowrap;
-    }
-    #toast.show { transform: translate(-50%, 0); }
-
-    /* --- Header (Fixed Top) --- */
-    header {
-      position: absolute; /* Using absolute inside fixed body */
-      top: 0; left: 0; width: 100%;
-      padding: 15px 20px;
-      padding-top: calc(15px + var(--sat));
-      display: flex; justify-content: space-between; align-items: center;
-      background: var(--bg-app); z-index: 50;
-      height: auto; /* Let content dictate height, we'll calculate main container top later */
-      box-shadow: 0 1px 0 rgba(0,0,0,0.05); /* Subtle separator */
-    }
-    .user-info { display: flex; gap: 10px; align-items: center; }
-    .avatar { width: 45px; height: 45px; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); object-fit: cover; }
-    .greetings h3 { margin: 0; font-size: 1rem; color: var(--text-main); font-weight: 600; line-height: 1.2; }
-    .greetings span { font-size: 0.75rem; color: var(--text-sub); }
-    
-    .btn-icon {
-      width: 40px; height: 40px; border-radius: 12px; background: white;
-      border: none; color: var(--primary); font-size: 1.1rem;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05); cursor: pointer; position: relative;
-      display: flex; align-items: center; justify-content: center;
-    }
-
-    /* --- Main Container (SCROLLABLE AREA) --- */
-    .main-container {
-      position: absolute;
-      top: 90px; /* Approximate header height + padding */
-      bottom: calc(var(--nav-height) + var(--sab)); /* Stop above nav bar */
-      left: 0; right: 0;
-      overflow-y: auto; /* Enable Vertical Scroll */
-      padding: 10px 20px 40px 20px; /* Add bottom padding for content breathing room */
-      scroll-behavior: smooth;
-      -webkit-overflow-scrolling: touch; /* Momentum scrolling on iOS */
-      overscroll-behavior-y: contain; /* Prevent scroll chaining to body */
-    }
-
-    /* Adjust top if notch exists or header is taller - handled dynamically usually, but safe estimate here */
-    @supports (padding-top: env(safe-area-inset-top)) {
-      .main-container { top: calc(90px + env(safe-area-inset-top)); }
-    }
-
-    /* Pages Animation */
-    .page { display: none; animation: fadeIn 0.3s ease; width: 100%; }
-    .page.active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
-    /* --- Components --- */
-    .card-hero {
-      background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%);
-      border-radius: var(--card-radius); padding: 20px; color: white;
-      position: relative; overflow: hidden; margin-bottom: 20px;
-      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
-    }
-    .card-hero h2 { margin: 5px 0; font-size: 1.3rem; line-height: 1.3; font-weight: 600; }
-    .card-hero p { margin: 0 0 15px 0; opacity: 0.9; font-weight: 300; font-size: 0.85rem; }
-    .tag-deadline { background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; margin-left: 5px; }
-    
-    .btn-action {
-      background: var(--accent); color: white; border: none;
-      padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer;
-      font-family: 'Prompt'; font-size: 0.85rem; box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3);
-      display: inline-flex; align-items: center; gap: 6px;
-    }
-
-    /* Stats Grid */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .stat-box {
-      background: white; padding: 15px; border-radius: 20px;
-      display: flex; flex-direction: column; justify-content: space-between;
-      height: 130px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); cursor: pointer;
-      transition: transform 0.1s; position: relative; overflow: hidden;
-    }
-    .stat-box:active { transform: scale(0.98); }
-    .stat-box.dark { background: var(--primary-dark); color: white; }
-    
-    .stat-icon { 
-      width: 36px; height: 36px; border-radius: 10px; 
-      display: flex; align-items: center; justify-content: center; 
-      margin-bottom: 8px; font-size: 1.1rem;
-    }
-    
-    .val { font-size: 1.4rem; font-weight: 700; line-height: 1; }
-    .label { font-size: 0.75rem; opacity: 0.8; margin-top: 4px; }
-    .trend { font-size: 0.7rem; color: var(--accent-secondary); display: flex; align-items: center; gap: 2px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    /* Task/List Items */
-    .task-item {
-      background: white; padding: 15px; border-radius: 16px;
-      display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: 0.1s;
-    }
-    .task-item:active { transform: scale(0.98); }
-    .task-icon {
-      width: 42px; height: 42px; border-radius: 12px; background: #EEF2FF; color: var(--primary);
-      display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;
-    }
-    .task-status { font-size: 0.65rem; padding: 3px 8px; border-radius: 6px; background: #DCFCE7; color: #166534; font-weight: 600; white-space: nowrap;}
-    .task-status.pending { background: #FFEDD5; color: #9A3412; }
-    .task-status.missing { background: #FEE2E2; color: #DC2626; }
-
-    /* Bottom Nav (FIXED) */
-    .nav-bar {
-      position: absolute; 
-      bottom: 0; left: 0; width: 100%;
-      height: calc(var(--nav-height) + var(--sab));
-      padding-bottom: var(--sab);
-      background: var(--primary-dark);
-      border-radius: 24px 24px 0 0;
-      display: grid; grid-template-columns: repeat(5, 1fr);
-      align-items: center; padding-left: 10px; padding-right: 10px;
-      box-shadow: 0 -5px 30px rgba(0,0,0,0.15);
-      z-index: 100;
-    }
-    .nav-btn {
-      background: none; border: none;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      color: rgba(255,255,255,0.5); cursor: pointer; transition: 0.2s;
-      padding-top: 10px;
-    }
-    .nav-btn i { font-size: 1.2rem; }
-    .nav-btn span { font-size: 0.6rem; font-weight: 500;}
-    .nav-btn.active { color: white; transform: translateY(-2px); }
-    .nav-btn.active span { font-weight: 600; }
-
-    .nav-center { transform: translateY(-25px); }
-    .btn-ai {
-      width: 55px; height: 55px; background: var(--accent);
-      border-radius: 50%; border: 5px solid var(--bg-app);
-      display: flex; align-items: center; justify-content: center;
-      color: white; font-size: 1.4rem;
-      box-shadow: 0 8px 20px rgba(249, 115, 22, 0.4);
-      cursor: pointer; transition: 0.2s; position: relative;
-    }
-    .btn-ai:active { transform: scale(0.9); }
-    .ai-pulse { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid var(--accent); animation: pulse 2s infinite; opacity: 0; }
-    @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.4); opacity: 0; } }
-
-    /* Loader */
-    #global-loader {
-      position: fixed; inset: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(5px);
-      z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      transition: opacity 0.3s;
-    }
-    #global-loader.hidden { opacity: 0; pointer-events: none; }
-    .spinner { width: 40px; height: 40px; border: 4px solid #E5E7EB; border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* Chat Modal */
-    #chat-modal-overlay {
-        position: fixed; inset: 0; z-index: 200;
-        background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
-        display: none; align-items: flex-end; justify-content: center;
-        opacity: 0; transition: opacity 0.3s;
-    }
-    #chat-modal-overlay.active { display: flex; opacity: 1; }
-    
-    .chat-modal-container {
-        width: 100%; height: 85dvh; /* Viewport Height for mobile */
-        max-width: 600px;
-        background: #F3F4F6;
-        border-radius: 24px 24px 0 0;
-        box-shadow: 0 -10px 40px rgba(0,0,0,0.2);
-        display: flex; flex-direction: column;
-        transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        overflow: hidden;
-    }
-    #chat-modal-overlay.active .chat-modal-container { transform: translateY(0); }
-
-    .chat-header {
-        padding: 16px 20px; background: white; border-bottom: 1px solid #E5E7EB;
-        display: flex; justify-content: space-between; align-items: center;
-        border-radius: 24px 24px 0 0; flex-shrink: 0;
-    }
-    .chat-body {
-        flex: 1; overflow-y: auto; padding: 15px;
-        display: flex; flex-direction: column; gap: 12px;
-        background: #F9FAFB;
-        -webkit-overflow-scrolling: touch;
-    }
-    .chat-footer {
-        padding: 12px 15px; 
-        padding-bottom: calc(12px + var(--sab));
-        background: white; border-top: 1px solid #E5E7EB;
-        display: flex; gap: 10px; align-items: center; flex-shrink: 0;
-    }
-    
-    .msg { padding: 10px 16px; max-width: 85%; border-radius: 18px; font-size: 0.9rem; line-height: 1.5; word-wrap: break-word; }
-    .msg.bot { background: white; align-self: flex-start; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #E5E7EB; color: #374151; }
-    .msg.user { background: var(--primary); color: white; align-self: flex-end; border-bottom-right-radius: 4px; box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2); }
-    
-    .chat-input-new {
-        flex: 1; border: none; background: #F3F4F6; padding: 10px 16px;
-        border-radius: 25px; font-family: 'Prompt'; outline: none; font-size: 0.95rem;
-    }
-    .chat-btn-new {
-        width: 40px; height: 40px; border-radius: 50%; background: var(--primary); color: white;
-        border: none; display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3); transition: 0.2s; font-size: 1rem;
-    }
-    .chat-btn-new:active { transform: scale(0.9); }
-
-  </style>
-</head>
-<body>
-
-  <!-- Loading Screen -->
-  <div id="global-loader">
-    <div class="spinner"></div>
-    <p style="margin-top: 10px; font-size: 0.9rem; color: var(--primary); font-weight: 600;">กำลังซิงค์ข้อมูล...</p>
-  </div>
-
-  <div id="toast"><i class="fas fa-check-circle"></i> <span id="toast-msg">ข้อความ</span></div>
-
-  <header>
-    <div class="user-info" onclick="navTo('profile')">
-      <img id="user-avatar" src="https://ui-avatars.com/api/?name=St&background=1e3a8a&color=fff" class="avatar" alt="Student">
-      <div class="greetings">
-        <span>สวัสดีครับ,</span>
-        <h3 id="user-name">...</h3>
-        <p style="font-size: 0.7rem; color: #6B7280; margin:0;" id="user-class">กำลังโหลด...</p>
-      </div>
-    </div>
-    <button class="btn-icon" onclick="initStudentDashboard(true)">
-      <i class="fas fa-sync-alt" id="refresh-icon"></i>
-    </button>
-  </header>
-
-  <div class="main-container no-scrollbar">
-    
-    <!-- === PAGE 1: DASHBOARD === -->
-    <div id="p-home" class="page active">
-      <div class="card-hero">
-        <p>งานที่ต้องส่ง <span class="tag-deadline" id="hero-term">ล่าสุด</span></p>
-        <h2 id="hero-title" style="font-weight: 600;">ไม่มีงานค้าง</h2>
-        <p id="hero-subtitle">คุณส่งงานครบทุกชิ้นแล้ว</p>
-        <button class="btn-action" onclick="navTo('tasks')">
-            <i class="fas fa-clipboard-list"></i> ดูงานทั้งหมด
-        </button>
-        <img src="https://cdn-icons-png.flaticon.com/512/2921/2921222.png" style="position:absolute; right:-20px; bottom:-30px; width:130px; opacity:0.15; transform: rotate(-15deg);">
-      </div>
-
-      <h4 style="margin: 20px 0 15px; font-weight: 600; padding-left: 5px; border-left: 4px solid var(--accent); line-height: 1;">สรุปผลการเรียน</h4>
-      <div class="grid-2">
-        <div class="stat-box dark" onclick="navTo('tasks')">
-          <div class="stat-icon" style="background:rgba(255,255,255,0.15);"><i class="fas fa-tasks"></i></div>
-          <div><div class="val" id="stat-pending">0</div><div class="label">งานค้างส่ง</div><div class="trend" id="stat-pending-trend" style="font-size: 0.65rem; opacity: 0.8;">เยี่ยมมาก!</div></div>
-        </div>
-        <div class="stat-box" onclick="navTo('attendance')">
-          <div class="stat-icon" style="background:#DCFCE7; color:#166534;"><i class="fas fa-user-check"></i></div>
-          <div><div class="val" id="stat-attendance">-</div><div class="label">มาเรียน</div><div class="trend" style="color:#166534;">คลิกเพื่อดู</div></div>
-        </div>
-        <div class="stat-box" onclick="navTo('grades')">
-          <div class="stat-icon" style="background:#E0F2FE; color:#0369A1;"><i class="fas fa-star"></i></div>
-          <div><div class="val" id="stat-score-avg">-</div><div class="label">คะแนนเฉลี่ย</div><div class="trend">จากงานที่ส่งแล้ว</div></div>
-        </div>
-        <div class="stat-box" onclick="navTo('profile')">
-          <div class="stat-icon" style="background:#FFEDD5; color:#C2410C;"><i class="fas fa-user-graduate"></i></div>
-          <div><div class="val" style="font-size: 1.2rem;">ข้อมูลส่วนตัว</div><div class="label" id="stat-id-card">-</div><div class="trend" style="color: #C2410C;">แตะเพื่อแก้ไข</div></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- === PAGE 2: GRADES === -->
-    <div id="p-grades" class="page">
-      <h3 style="margin-bottom:20px; font-weight: 600;">ผลการเรียนรายวิชา</h3>
-      <div style="background:white; padding:15px; border-radius:20px; box-shadow:0 5px 20px rgba(0,0,0,0.03); margin-bottom: 20px;">
-        <canvas id="scoreChart" height="220"></canvas>
-      </div>
-      <h4 style="margin: 20px 0 10px; font-weight: 600;">คะแนนล่าสุด</h4>
-      <div id="grade-list-container" style="padding-bottom: 20px;">
-          <div class="text-center text-gray-400 py-10 opacity-50"><i class="fas fa-chart-bar text-3xl mb-2"></i><br>กำลังโหลด...</div>
-      </div>
-    </div>
-
-    <!-- === PAGE 3: TASKS === -->
-    <div id="p-tasks" class="page">
-      <h3 style="margin-bottom:20px; font-weight: 600;">งานและการบ้าน</h3>
-      <div id="tasks-container" style="padding-bottom: 20px;"></div>
-    </div>
-
-    <!-- === PAGE 4: ATTENDANCE (NEW) === -->
-    <div id="p-attendance" class="page">
-      <h3 style="margin-bottom:20px; font-weight: 600;">ประวัติการเข้าเรียน</h3>
-      <div id="attendance-list-container" style="display: flex; flex-direction: column; gap: 10px; padding-bottom: 20px;">
-          <div class="text-center text-gray-400 py-10">ไม่พบประวัติการขาดเรียน</div>
-      </div>
-    </div>
-
-    <!-- === ASSISTANT ATTENDANCE: STUDENT-ONLY ENTRY === -->
-    <div id="p-assistant-attendance" class="page">
-      <h3 style="margin-bottom:12px; font-weight: 600;">เช็คชื่อประจำวิชา</h3>
-      <div style="background:white; border-radius:20px; padding:14px; box-shadow:0 5px 20px rgba(0,0,0,0.03); margin-bottom:14px;">
-        <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">วิชา</label>
-        <select id="assistant-subject-select" onchange="assistantLoadAttendance()" style="width:100%; margin:4px 0 10px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; font-family:Prompt; background:white;"></select>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-          <div>
-            <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">วันที่</label>
-            <input id="assistant-att-date" type="date" onchange="assistantLoadAttendance()" style="width:100%; margin-top:4px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; font-family:Prompt;">
-          </div>
-          <div>
-            <label style="font-size:0.72rem; color:#6B7280; font-weight:600;">ห้อง</label>
-            <div id="assistant-class-label" style="margin-top:4px; border:1px solid #E5E7EB; border-radius:14px; padding:10px; background:#F9FAFB; font-weight:600;">-</div>
-          </div>
-        </div>
-        <button onclick="assistantSaveAllAttendance()" class="btn-action" style="width:100%; justify-content:center; margin-top:12px; border-radius:14px; padding:11px;">
-          <i class="fas fa-cloud-arrow-up"></i> บันทึกทั้งหมด
-        </button>
-      </div>
-      <div id="assistant-attendance-list" style="display:flex; flex-direction:column; gap:10px; padding-bottom:20px;">
-        <div class="text-center text-gray-400 py-10">กำลังเตรียมข้อมูล...</div>
-      </div>
-    </div>
-
-    <!-- === PAGE 5: PROFILE === -->
-    <div id="p-profile" class="page">
-      <div style="text-align:center; margin-top:20px; padding: 20px 0; background: white; border-radius: 24px; box-shadow: 0 5px 20px rgba(0,0,0,0.03);">
-        <!-- Profile Image with Edit Overlay -->
-        <div style="position:relative; display:inline-block;" onclick="document.getElementById('profile-upload').click()">
-          <img id="profile-img-lg" src="https://ui-avatars.com/api/?name=User&background=ccc" style="width:100px; height:100px; border-radius:50%; border:4px solid white; box-shadow:0 10px 20px rgba(0,0,0,0.1); object-fit: cover;">
-          <div style="position:absolute; bottom:5px; right:5px; background:var(--accent); width:28px; height:28px; border-radius:50%; border:3px solid white; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem;">
-            <i class="fas fa-camera"></i>
-          </div>
-        </div>
-        <!-- Hidden File Input -->
-        <input type="file" id="profile-upload" style="display: none;" accept="image/*" onchange="uploadProfileImage(this)">
-        
-        <!-- Editable Name -->
-        <div class="flex items-center justify-center gap-2 mt-4">
-            <h2 style="font-size: 1.2rem; margin:0;" id="profile-name">-</h2>
-            <button onclick="editProfileName()" class="text-gray-400 hover:text-blue-600"><i class="fas fa-pen"></i></button>
-        </div>
-        <span class="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-bold mt-2 inline-block" id="profile-status">Active</span>
-      </div>
-      
-      <div style="margin-top:20px; display:flex; flex-direction:column; gap:12px;">
-        <div class="task-item"><i class="fas fa-id-card text-2xl text-blue-600 w-8"></i><div style="flex:1"><span class="text-xs text-gray-400 block">รหัสประจำตัว</span><b id="profile-id" class="text-gray-700">-</b></div></div>
-        <div class="task-item"><i class="fas fa-layer-group text-2xl text-orange-500 w-8"></i><div style="flex:1"><span class="text-xs text-gray-400 block">ระดับชั้น/ห้อง</span><b id="profile-room" class="text-gray-700">-</b></div></div>
-        <div class="task-item" onclick="logout()" style="cursor: pointer;"><i class="fas fa-sign-out-alt text-2xl text-red-500 w-8"></i><b style="color:red;">ออกจากระบบ</b></div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Chat Modal -->
-  <div id="chat-modal-overlay">
-      <div class="chat-modal-container">
-          <div class="chat-header">
-              <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md shrink-0"><i class="fas fa-robot"></i></div>
-                  <div><h4 style="margin:0; font-weight:600; font-size:1rem;">EduBot AI</h4><span style="font-size:0.7rem; color:#6B7280; display:flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; background:#10B981; border-radius:50%;"></span> ตอบคำถามจากข้อมูลจริง</span></div>
-              </div>
-              <button onclick="toggleChatModal()" style="border:none; background:none; font-size:1.2rem; color:#9CA3AF; padding:8px;"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="chat-body" id="chat-box">
-              <div class="msg bot"><i class="fas fa-robot"></i><br>สวัสดีครับ ผมรู้ข้อมูลเกรดและงานค้างของคุณ อยากรู้วิชาไหนถามได้เลยครับ</div>
-          </div>
-          <div class="chat-footer">
-              <input type="text" id="chat-input" class="chat-input-new" placeholder="เช่น เกรดสังคม, งานค้างมีไหม" autocomplete="off" onkeydown="if(event.key==='Enter') sendChat()">
-              <button class="chat-btn-new" onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
-          </div>
-      </div>
-  </div>
-
-  <!-- Navbar -->
-  <nav class="nav-bar">
-    <button class="nav-btn active" onclick="navTo('home')"><i class="fas fa-th-large"></i> <span>หน้าหลัก</span></button>
-    <button class="nav-btn" onclick="navTo('grades')"><i class="fas fa-chart-pie"></i> <span>ผลเรียน</span></button>
-    <div class="nav-center"><button class="btn-ai" onclick="toggleChatModal()"><div class="ai-pulse"></div><i class="fas fa-comment-dots"></i></button></div>
-    <button class="nav-btn" onclick="navTo('tasks')"><i class="fas fa-clipboard-list"></i> <span>งาน</span></button>
-    <button class="nav-btn" onclick="navTo('profile')"><i class="fas fa-user"></i> <span>ข้อมูล</span></button>
-  </nav>
-
-  <script>
-    if (typeof CURRENT_USER === 'undefined') window.CURRENT_USER = null;
-    // --- GLOBAL DATA STORE ---
-    let STUDENT_DATA = { scores: {}, assignments: [], attendance: [], subjectMap: {} };
-    let ASSISTANT_ATTENDANCE_STATE = { students: [], scope: null };
-    const CACHE_KEY = 'eduverse_student_data';
-    const CACHE_USER_KEY = 'eduverse_user_profile';
-
-    function getStudentActiveTerm() {
-        if (STUDENT_DATA && STUDENT_DATA.term) return STUDENT_DATA.term;
-        if (CURRENT_USER && CURRENT_USER.term) return CURRENT_USER.term;
-        return 'current';
-    }
-
-    function getStudentCacheKey(prefix) {
-        const studentId = CURRENT_USER && CURRENT_USER.id ? CURRENT_USER.id : 'anonymous';
-        return `${prefix}_${studentId}_${getStudentActiveTerm()}`;
-    }
-
-    function safeEl(id) { return document.getElementById(id); }
-    function hasEl(id) { return !!safeEl(id); }
-    function setTextSafe(id, text) { const el = safeEl(id); if (el) el.innerText = text; }
-    function setHtmlSafe(id, html) { const el = safeEl(id); if (el) el.innerHTML = html; }
-
-    window.addEventListener('load', function() {
-        if (isAssistantStandaloneLink()) {
-            initAssistantStandalone();
-        } else if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
-            initStudentDashboard();
-        } else {
-            console.warn("CURRENT_USER missing.");
-            setTimeout(() => { const loader = safeEl('global-loader'); if (loader) loader.classList.add('hidden'); }, 2000);
-        }
-    });
-
-    function getAssistantStandaloneParams() {
-        const params = new URLSearchParams(window.location.search || '');
-        const assistant = params.get('assistant') === '1' || params.get('mode') === 'assistant';
-        const uid = (params.get('uid') || params.get('sid') || '').trim();
-        if (!assistant || !uid) return null;
-        return {
-            uid,
-            term: (params.get('term') || '').trim(),
-            subject: (params.get('subject') || params.get('subjectCode') || '').trim(),
-            level: (params.get('level') || '').trim(),
-            room: (params.get('room') || '').trim()
-        };
-    }
-
-    function isAssistantStandaloneLink() {
-        return !!getAssistantStandaloneParams();
-    }
-
-    function setAssistantLoading(show, text) {
-        const loader = safeEl('global-loader');
-        const loaderText = loader ? loader.querySelector('p') : null;
-        if (loaderText && text) loaderText.innerText = text;
-        if (loader) loader.classList.toggle('hidden', !show);
-    }
-
-    function initAssistantStandalone() {
-        const link = getAssistantStandaloneParams();
-        if (!link) return;
-        setAssistantLoading(true, 'กำลังเปิดหน้าเช็คชื่อ...');
-        google.script.run
-            .withSuccessHandler(res => {
-                if (!res || !res.success || !res.user || res.user.role !== 'attendance_assistant') {
-                    setAssistantLoading(false);
-                    Swal.fire('เปิดลิงก์ไม่ได้', 'นักเรียนคนนี้ยังไม่ได้รับสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ', 'error');
-                    return;
-                }
-                CURRENT_USER = res.user;
-                CURRENT_USER.assistantLink = link;
-                renderUserProfile(CURRENT_USER);
-                setupAssistantAttendanceMode(link);
-            })
-            .withFailureHandler(err => {
-                setAssistantLoading(false);
-                Swal.fire('เปิดลิงก์ไม่ได้', String(err), 'error');
-            })
-            .loginSystem(link.uid, link.uid);
-    }
-
-    function setupAssistantAttendanceMode(link) {
-        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
-        const page = safeEl('p-assistant-attendance');
-        if (page) page.classList.add('active');
-        const nav = document.querySelector('.nav-bar');
-        if (nav) nav.style.display = 'none';
-        const main = document.querySelector('.main-container');
-        if (main) main.style.bottom = '0';
-        const refreshBtn = document.querySelector('header .btn-icon');
-        if (refreshBtn) refreshBtn.setAttribute('onclick', 'assistantLoadAttendance(true)');
-
-        const today = new Date();
-        const dateEl = safeEl('assistant-att-date');
-        if (dateEl && !dateEl.value) {
-            const yyyy = today.getFullYear();
-            const mm = String(today.getMonth() + 1).padStart(2, '0');
-            const dd = String(today.getDate()).padStart(2, '0');
-            dateEl.value = `${yyyy}-${mm}-${dd}`;
-        }
-
-        const scope = Array.isArray(CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
-        const select = safeEl('assistant-subject-select');
-        if (select) {
-            const options = scope.map((s, idx) => {
-                const selected = link.subject && String(s.subjectCode) === String(link.subject) && String(s.level) === String(link.level) && String(s.room) === String(link.room);
-                return `<option value="${idx}" ${selected ? 'selected' : ''}>${s.subjectCode} | ${s.level}/${s.room}</option>`;
-            }).join('');
-            select.innerHTML = options || '<option value="">ไม่มีสิทธิ์เช็คชื่อ</option>';
-        }
-        assistantLoadAttendance(true);
-    }
-
-    function getAssistantSelectedScope() {
-        const scopeList = Array.isArray(CURRENT_USER && CURRENT_USER.assistantScope) ? CURRENT_USER.assistantScope : [];
-        const select = safeEl('assistant-subject-select');
-        const index = select ? parseInt(select.value, 10) : 0;
-        return scopeList[index] || scopeList[0] || null;
-    }
-
-    function assistantLoadAttendance(showLoader) {
-        const scope = getAssistantSelectedScope();
-        const list = safeEl('assistant-attendance-list');
-        if (!scope) {
-            if (list) list.innerHTML = '<div class="text-center text-red-400 py-10">ไม่มีสิทธิ์เช็คชื่อ</div>';
-            setAssistantLoading(false);
-            return;
-        }
-        ASSISTANT_ATTENDANCE_STATE.scope = scope;
-        const date = safeEl('assistant-att-date') ? safeEl('assistant-att-date').value : '';
-        const classLabel = safeEl('assistant-class-label');
-        if (classLabel) classLabel.innerText = `${scope.level}/${scope.room}`;
-        if (!date) return;
-        if (showLoader) setAssistantLoading(true, 'กำลังโหลดรายชื่อ...');
-        if (list) list.innerHTML = '<div class="text-center text-gray-400 py-10">กำลังโหลดรายชื่อ...</div>';
-        google.script.run
-            .withSuccessHandler(res => {
-                setAssistantLoading(false);
-                if (!res || !res.success) {
-                    if (list) list.innerHTML = `<div class="text-center text-red-400 py-10">${res && res.message ? res.message : 'โหลดไม่สำเร็จ'}</div>`;
-                    return;
-                }
-                ASSISTANT_ATTENDANCE_STATE.students = res.students || [];
-                renderAssistantAttendanceList();
-            })
-            .withFailureHandler(err => {
-                setAssistantLoading(false);
-                if (list) list.innerHTML = `<div class="text-center text-red-400 py-10">${String(err)}</div>`;
-            })
-            .getAttendanceForCheck({
-                date,
-                subject: scope.subjectCode,
-                subjectCode: scope.subjectCode,
-                level: scope.level,
-                room: scope.room,
-                term: scope.term,
-                user: CURRENT_USER
-            });
-    }
-
-    function renderAssistantAttendanceList() {
-        const list = safeEl('assistant-attendance-list');
-        if (!list) return;
-        const students = ASSISTANT_ATTENDANCE_STATE.students || [];
-        if (!students.length) {
-            list.innerHTML = '<div class="text-center text-gray-400 py-10">ไม่พบรายชื่อนักเรียนในห้องนี้</div>';
-            return;
-        }
-        const statuses = ['มา', 'สาย', 'ลา', 'ขาด'];
-        list.innerHTML = students.map(s => {
-            const current = s.attStatus || 'มา';
-            const name = `${s.prefix || ''}${s.first || ''} ${s.last || ''}`.trim();
-            const buttons = statuses.map(st => {
-                const active = current === st;
-                const bg = active ? (st === 'ขาด' ? '#DC2626' : st === 'ลา' ? '#2563EB' : st === 'สาย' ? '#F59E0B' : '#16A34A') : '#F3F4F6';
-                const color = active ? 'white' : '#64748B';
-                return `<button onclick="assistantSetStatus('${s.id}','${st}')" style="border:none; border-radius:12px; padding:8px 0; font-family:Prompt; font-weight:700; background:${bg}; color:${color};">${st}</button>`;
-            }).join('');
-            return `<div style="background:white; border-radius:18px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,0.03);">
-                <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:10px;">
-                  <div><div style="font-weight:700;">${s.no || '-'} ${name}</div><div style="font-size:0.72rem; color:#94A3B8;">${s.id}</div></div>
-                  <div style="font-size:0.72rem; color:#64748B;">${s.attRecorder ? 'บันทึกแล้ว' : ''}</div>
-                </div>
-                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px;">${buttons}</div>
-                <input value="${s.attNote || ''}" onchange="assistantSetNote('${s.id}', this.value)" placeholder="หมายเหตุ..." style="width:100%; margin-top:10px; border:1px solid #E5E7EB; border-radius:12px; padding:9px; font-family:Prompt; font-size:0.82rem;">
-              </div>`;
-        }).join('');
-    }
-
-    function assistantSetStatus(studentId, status) {
-        const student = (ASSISTANT_ATTENDANCE_STATE.students || []).find(s => String(s.id) === String(studentId));
-        if (!student) return;
-        student.attStatus = status;
-        student.isChecked = true;
-        renderAssistantAttendanceList();
-    }
-
-    function assistantSetNote(studentId, note) {
-        const student = (ASSISTANT_ATTENDANCE_STATE.students || []).find(s => String(s.id) === String(studentId));
-        if (!student) return;
-        student.attNote = note;
-        student.isChecked = true;
-    }
-
-    function assistantSaveAllAttendance() {
-        const scope = ASSISTANT_ATTENDANCE_STATE.scope || getAssistantSelectedScope();
-        const date = safeEl('assistant-att-date') ? safeEl('assistant-att-date').value : '';
-        const students = ASSISTANT_ATTENDANCE_STATE.students || [];
-        if (!scope || !date || !students.length) {
-            Swal.fire('เตือน', 'กรุณาโหลดรายชื่อก่อนบันทึก', 'warning');
-            return;
-        }
-        const records = students.map(s => ({ id: s.id, status: s.attStatus || 'มา', note: s.attNote || '' }));
-        setAssistantLoading(true, 'กำลังบันทึก...');
-        google.script.run
-            .withSuccessHandler(res => {
-                setAssistantLoading(false);
-                if (!res || !res.success) {
-                    Swal.fire('บันทึกไม่สำเร็จ', res && res.message ? res.message : 'Server error', 'error');
-                    return;
-                }
-                Swal.fire({ icon: 'success', title: 'บันทึกเรียบร้อย', timer: 1200, showConfirmButton: false });
-                assistantLoadAttendance(false);
-            })
-            .withFailureHandler(err => {
-                setAssistantLoading(false);
-                Swal.fire('บันทึกไม่สำเร็จ', String(err), 'error');
-            })
-            .saveAttendance({
-                date,
-                subject: scope.subjectCode,
-                level: scope.level,
-                room: scope.room,
-                term: scope.term,
-                recorder: CURRENT_USER ? CURRENT_USER.name : 'ผู้ช่วยเช็คชื่อ',
-                records,
-                user: CURRENT_USER
-            });
-    }
-
-    function initStudentDashboard(forceRefresh = false) {
-        if (!CURRENT_USER) return;
-        renderUserProfile(CURRENT_USER);
-        const cachedData = localStorage.getItem(getStudentCacheKey(CACHE_KEY));
-        if (cachedData && !forceRefresh) {
-            try {
-                STUDENT_DATA = JSON.parse(cachedData);
-                updateDashboardUI();
-            } catch (e) { localStorage.removeItem(getStudentCacheKey(CACHE_KEY)); }
-            const cachedProfile = localStorage.getItem(getStudentCacheKey(CACHE_USER_KEY));
-            if(cachedProfile) {
-                try {
-                    const p = JSON.parse(cachedProfile);
-                    if(p.id === CURRENT_USER.id) syncUserProfile(p, false);
-                } catch(e) {}
-            }
-        }
-        fetchStudentData(forceRefresh);
-    }
-
-    function renderUserProfile(user) {
-        const userName = safeEl('user-name'); if (userName) userName.innerText = user.name || 'นักเรียน';
-        const profileName = safeEl('profile-name'); if (profileName) profileName.innerText = user.name || '-';
-        const profileId = safeEl('profile-id'); if (profileId) profileId.innerText = user.id || '-';
-        const classStr = (user.level && user.room) ? `ม.${user.level}/${user.room}` : 'กำลังโหลด...';
-        const userClass = safeEl('user-class'); if (userClass) userClass.innerText = classStr;
-        const profileRoom = safeEl('profile-room'); if (profileRoom) profileRoom.innerText = classStr;
-        const statIdCard = safeEl('stat-id-card'); if(user.id && statIdCard) statIdCard.innerText = user.id;
-        if(user.imageUrl) {
-            const userAvatar = safeEl('user-avatar'); if (userAvatar) userAvatar.src = user.imageUrl;
-            const profileImg = safeEl('profile-img-lg'); if (profileImg) profileImg.src = user.imageUrl;
-        }
-    }
-
-    function syncUserProfile(fullData, saveToCache = true) {
-        if (fullData.level) CURRENT_USER.level = fullData.level;
-        if (fullData.room) CURRENT_USER.room = fullData.room;
-        if (fullData.name) CURRENT_USER.name = fullData.name;
-        if (fullData.term) CURRENT_USER.term = fullData.term;
-        renderUserProfile(CURRENT_USER);
-        if(saveToCache) localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
-    }
-
-    function fetchStudentData(refresh = false) {
-        const loader = document.getElementById('global-loader');
-        const refreshIcon = document.getElementById('refresh-icon');
-        if(refresh && loader) loader.classList.remove('hidden');
-        if(refreshIcon) refreshIcon.classList.add('fa-spin');
-
-        google.script.run.withSuccessHandler(res => {
-            if(loader) loader.classList.add('hidden');
-            if(refreshIcon) refreshIcon.classList.remove('fa-spin');
-            if (res && res.success) {
-                processData(res.data);
-                showToast('อัปเดตข้อมูลล่าสุดแล้ว');
-            }
-        }).withFailureHandler(err => {
-            if(loader) loader.classList.add('hidden');
-            if(refreshIcon) refreshIcon.classList.remove('fa-spin');
-            showToast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
-        }).getStudentModeData(CURRENT_USER.id, CURRENT_USER);
-    }
-
-    function processData(data) {
-        if (data.profile) {
-            const p = data.profile;
-            const fullName = `${p.prefix}${p.first} ${p.last}`;
-            syncUserProfile({ level: p.level, room: p.room, name: fullName, term: p.term || data.term });
-        }
-        
-        const myAssignments = [];
-        if (data.assignments) {
-            data.assignments.forEach(asn => {
-                const key = `${asn.id}_${CURRENT_USER.id}`;
-                const scoreRecord = data.scores ? data.scores[key] : null;
-                
-                // Get Full Subject Info
-                let subjectInfo = `${asn.subject}`;
-                let teacherName = "-";
-                if (data.subjectMap && data.subjectMap[asn.subject]) {
-                    const sm = data.subjectMap[asn.subject];
-                    subjectInfo = `${asn.subject} ${sm.name}`; // Format: Code Name
-                    teacherName = sm.teacher;
-                }
-                
-                // Parse Title if it has description (Title:::Desc)
-                let titleDisplay = asn.title;
-                if(asn.title && asn.title.includes(':::')) {
-                    titleDisplay = asn.title.split(':::')[0];
-                }
-                
-                myAssignments.push({
-                    ...asn,
-                    title: titleDisplay, // Use clean title
-                    subjectDisplay: subjectInfo,
-                    teacher: teacherName,
-                    myScore: scoreRecord ? scoreRecord.score : undefined,
-                    isSubmitted: scoreRecord ? (scoreRecord.isSubmitted == 1 || scoreRecord.isSubmitted === true) : false
-                });
-            });
-        }
-
-        let present=0, late=0, leave=0, absent=0;
-        if (data.attendance) {
-            data.attendance.forEach(att => {
-                if (att.status === 'มา') present++;
-                else if (att.status === 'สาย') late++;
-                else if (att.status === 'ลา') leave++;
-                else if (att.status === 'ขาด') absent++;
-            });
-        }
-
-        STUDENT_DATA = {
-            assignments: myAssignments || [],
-            attendance: data.attendance || [],
-            stats: { present, late, leave, absent },
-            subjectMap: data.subjectMap || {},
-            term: data.term || getStudentActiveTerm()
-        };
-        if (data.term) CURRENT_USER.term = data.term;
-        localStorage.setItem(getStudentCacheKey(CACHE_KEY), JSON.stringify(STUDENT_DATA));
-        updateDashboardUI();
-    }
-
-    function updateDashboardUI() {
-        const d = STUDENT_DATA;
-        if (!d.assignments) d.assignments = [];
-        
-        // --- HOME STATS ---
-        const totalAtt = d.stats.present + d.stats.late + d.stats.leave + d.stats.absent;
-        const attPercent = totalAtt > 0 ? Math.round(((d.stats.present + d.stats.late) / totalAtt) * 100) : 0;
-        setTextSafe('stat-attendance', totalAtt > 0 ? `${attPercent}%` : '-');
-        
-        const pending = d.assignments.filter(a => !a.isSubmitted).length;
-        setTextSafe('stat-pending', pending);
-        const pendingTrend = safeEl('stat-pending-trend');
-        if (pendingTrend) {
-            pendingTrend.innerText = pending > 0 ? `${pending} งานค้าง` : 'เยี่ยมมาก!';
-            pendingTrend.style.color = pending > 0 ? '#C2410C' : '#10B981';
-        }
-
-        // Hero Card
-        if (pending > 0) {
-            const nextWork = d.assignments.find(a => !a.isSubmitted);
-            setTextSafe('hero-title', nextWork.subjectDisplay);
-            setTextSafe('hero-subtitle', `${nextWork.title} (ค้างส่ง)`);
-            const heroTerm = safeEl('hero-term');
-            if (heroTerm) { heroTerm.innerText = 'ด่วน'; heroTerm.style.background = 'rgba(239, 68, 68, 0.3)'; }
-        } else {
-            setTextSafe('hero-title', "งานครบแล้ว");
-            setTextSafe('hero-subtitle', "ไม่มีงานค้างส่ง");
-            const heroTerm = safeEl('hero-term');
-            if (heroTerm) { heroTerm.innerText = 'ล่าสุด'; heroTerm.style.background = 'rgba(255,255,255,0.25)'; }
-        }
-
-        // --- TASKS RENDER ---
-        const tasksContainer = safeEl('tasks-container');
-        if (!tasksContainer) return;
-        tasksContainer.innerHTML = '';
-        if (d.assignments.length === 0) {
-            tasksContainer.innerHTML = `<div class="text-center p-10 text-gray-400 opacity-60"><i class="fas fa-clipboard-check text-4xl mb-3"></i><br>ไม่มีงานในระบบ</div>`;
-        } else {
-            // Sort: Pending first
-            const sortedAsn = [...d.assignments].sort((a,b) => (a.isSubmitted === b.isSubmitted) ? 0 : a.isSubmitted ? 1 : -1);
-            sortedAsn.forEach(a => {
-                const isLate = !a.isSubmitted && new Date(a.dueDate) < new Date();
-                let statusClass = a.isSubmitted ? '' : (isLate ? 'missing' : 'pending');
-                let statusText = a.isSubmitted ? 'ส่งแล้ว' : (isLate ? 'ขาดส่ง' : 'รอส่ง');
-                let icon = a.isSubmitted ? 'fa-check' : 'fa-exclamation';
-                let iconBg = a.isSubmitted ? '#DCFCE7' : '#FFEDD5';
-                let iconColor = a.isSubmitted ? '#166534' : '#C2410C';
-                
-                // DISPLAY SCORE LOGIC
-                let scoreText = '';
-                if (a.myScore !== undefined && a.myScore !== null && a.myScore !== '') {
-                    // Has Score -> Show Score/Max
-                    scoreText = `<span style="font-size:0.9rem; color:#166534; font-weight:bold;">${a.myScore}</span><span style="font-size:0.7rem; color:#9CA3AF;">/${a.maxScore}</span>`;
-                } else if (a.isSubmitted) {
-                    // Submitted but no score -> "Waiting"
-                    scoreText = `<span style="font-size:0.75rem; color:#2563EB;">รอตรวจ</span>`;
-                } else {
-                    // Not submitted
-                    scoreText = `<span style="font-size:0.75rem; color:${isLate?'#DC2626':'#F59E0B'};">${isLate?'ขาดส่ง':'รอส่ง'}</span>`;
-                }
-
-                tasksContainer.innerHTML += `
-                <div class="task-item">
-                    <div class="task-icon" style="background:${iconBg}; color:${iconColor};"><i class="fas ${icon}"></i></div>
-                    <div style="flex:1; overflow:hidden;">
-                        <b style="font-size:0.9rem; color:#374151; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${a.subjectDisplay}</b>
-                        <span style="font-size:0.75rem; color:#6B7280; display:block;">${a.title}</span>
-                        <span style="font-size:0.65rem; color:#9CA3AF; display:block;">ผู้สอน ${a.teacher}</span>
-                    </div>
-                    <div style="text-align:right;">
-                        <span class="task-status ${statusClass}" style="display:inline-block; margin-bottom:4px;">${statusText}</span>
-                        <div style="line-height:1;">${scoreText}</div>
-                    </div>
-                </div>`;
-            });
-        }
-
-        // --- ATTENDANCE RENDER (Detailed List) ---
-        const attContainer = safeEl('attendance-list-container');
-        if (!attContainer) return;
-        attContainer.innerHTML = '';
-        if (!d.attendance || d.attendance.length === 0) {
-            attContainer.innerHTML = `<div class="text-center text-gray-400 py-10">ไม่พบประวัติการขาดเรียน</div>`;
-        } else {
-            [...d.attendance].reverse().forEach(att => {
-                let color = att.status == 'มา' ? '#10B981' : (att.status == 'ขาด' ? '#EF4444' : '#F59E0B');
-                let attSubj = att.subject;
-                let attTeacher = '';
-                if(d.subjectMap && d.subjectMap[att.subject]) {
-                    attSubj = `${att.subject} ${d.subjectMap[att.subject].name}`;
-                    attTeacher = `ผู้สอน ${d.subjectMap[att.subject].teacher}`;
-                }
-
-                attContainer.innerHTML += `
-                <div style="background:white; padding:12px; border-radius:12px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 5px rgba(0,0,0,0.02);">
-                    <div>
-                        <div style="font-size:0.9rem; font-weight:600;">${att.date}</div>
-                        <div style="font-size:0.75rem; color:gray;">${attSubj}</div>
-                        <div style="font-size:0.65rem; color:#9CA3AF;">${attTeacher}</div>
-                    </div>
-                    <span style="background:${color}20; color:${color}; padding:4px 10px; border-radius:6px; font-size:0.8rem; font-weight:600;">${att.status}</span>
-                </div>`;
-            });
-        }
-
-        updateChart();
-    }
-
-    function updateChart() {
-        const chartEl = safeEl('scoreChart');
-        if (!chartEl) return;
-        const ctx = chartEl.getContext('2d');
-        const subjects = {};
-        STUDENT_DATA.assignments.forEach(a => {
-            if (a.myScore !== undefined && !isNaN(a.myScore)) {
-                if (!subjects[a.subjectCode]) subjects[a.subjectCode] = { name: a.subjectName, got: 0, max: 0 };
-                subjects[a.subjectCode].got += Number(a.myScore);
-                subjects[a.subjectCode].max += Number(a.maxScore);
-            }
-        });
-
-        const labels = Object.values(subjects).map(s => s.name ? s.name.substring(0, 10)+'...' : 'วิชา');
-        const data = Object.values(subjects).map(s => s.max > 0 ? Math.round((s.got / s.max) * 100) : 0);
-
-        if (data.length > 0) {
-            const avg = data.reduce((a,b) => a+b, 0) / data.length;
-            setTextSafe('stat-score-avg', avg.toFixed(0) + '%');
-        }
-
-        const listContainer = safeEl('grade-list-container');
-        if (!listContainer) return;
-        listContainer.innerHTML = '';
-        const gradedAsn = STUDENT_DATA.assignments.filter(a => a.myScore !== undefined && !isNaN(a.myScore));
-        
-        if(gradedAsn.length === 0) listContainer.innerHTML = `<div class="text-center text-gray-400 text-sm py-4">ยังไม่มีคะแนน</div>`;
-        else {
-            gradedAsn.slice(-5).reverse().forEach(a => {
-                const percent = (Number(a.myScore) / Number(a.maxScore)) * 100;
-                const color = percent >= 50 ? '#2563EB' : '#DC2626';
-                listContainer.innerHTML += `
-                <div class="task-item" style="padding: 12px;">
-                    <div class="task-icon" style="width:40px; height:40px; font-size:1rem; background:#EEF2FF;"><i class="fas fa-star"></i></div>
-                    <div style="flex:1;">
-                        <b style="font-size:0.85rem;">${a.subjectDisplay}</b>
-                        <span style="display:block; font-size:0.75rem; color:gray;">${a.title}</span>
-                        <span style="font-size:0.65rem; color:#9CA3AF; display:block;">ผู้สอน ${a.teacher}</span>
-                    </div>
-                    <div style="text-align:right;">
-                        <b style="font-size:1rem; color:${color};">${a.myScore}/${a.maxScore}</b>
-                    </div>
-                </div>`;
-            });
-        }
-
-        if (window.myScoreChart) window.myScoreChart.destroy();
-        window.myScoreChart = new Chart(ctx, {
-            type: 'bar',
-            data: { labels: labels, datasets: [{ label: 'คะแนน (%)', data: data, backgroundColor: '#2563EB', borderRadius: 6 }] },
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
-        });
-    }
-
-    // --- EDIT PROFILE NAME ---
-    async function editProfileName() {
-        const { value: text } = await Swal.fire({
-            title: 'แก้ไขชื่อ-สกุล',
-            input: 'text',
-            inputValue: CURRENT_USER.name,
-            showCancelButton: true,
-            confirmButtonText: 'บันทึก',
-            cancelButtonText: 'ยกเลิก'
-        });
-
-        if (text) {
-            showToast('กำลังบันทึกชื่อ...');
-            // Mock update locally first
-            CURRENT_USER.name = text;
-            renderUserProfile(CURRENT_USER);
-            
-            // Send to backend
-            const parts = text.split(' ');
-            const prefix = ''; // Simplification
-            const first = parts[0] || '';
-            const last = parts.slice(1).join(' ') || '';
-            
-            google.script.run.withSuccessHandler(res => {
-                if(res.success) {
-                    showToast('บันทึกชื่อเรียบร้อย');
-                    localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
-                } else showToast('บันทึกไม่สำเร็จ');
-            }).saveUserProfile({ id: CURRENT_USER.id, name: text, prefix: prefix, firstName: first, lastName: last }, null);
-        }
-    }
-
-    function uploadProfileImage(input) {
-        if (input.files && input.files[0]) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = new Image();
-                img.src = e.target.result;
-                img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 300;
-                    const scaleSize = MAX_WIDTH / img.width;
-                    canvas.width = MAX_WIDTH;
-                    canvas.height = img.height * scaleSize;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-                    
-                    const profileImg = safeEl('profile-img-lg'); if (profileImg) profileImg.src = e.target.result;
-                    const userAvatar = safeEl('user-avatar'); if (userAvatar) userAvatar.src = e.target.result;
-                    showToast('กำลังอัปโหลดรูป...');
-                    
-                    google.script.run.withSuccessHandler(res => {
-                        if(res.success) {
-                            CURRENT_USER.imageUrl = res.imageUrl;
-                            localStorage.setItem(getStudentCacheKey(CACHE_USER_KEY), JSON.stringify(CURRENT_USER));
-                            showToast('บันทึกรูปโปรไฟล์แล้ว');
-                        } else showToast('อัปโหลดไม่สำเร็จ');
-                    }).saveUserProfile(CURRENT_USER, base64);
-                }
-            };
-            reader.readAsDataURL(input.files[0]);
-        }
-    }
-
-    function navTo(pageId) {
-        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
-        const page = safeEl('p-' + pageId);
-        if (page) page.classList.add('active');
-        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-        const btns = document.querySelectorAll('.nav-btn');
-        if (pageId === 'home' && btns[0]) btns[0].classList.add('active');
-        if (pageId === 'grades' && btns[1]) btns[1].classList.add('active');
-        if (pageId === 'tasks' && btns[2]) btns[2].classList.add('active');
-        if (pageId === 'profile' && btns[3]) btns[3].classList.add('active');
-    }
-
-    function toggleChatModal() {
-        const overlay = safeEl('chat-modal-overlay');
-        if (!overlay) return;
-        if (overlay.classList.contains('active')) {
-            overlay.classList.remove('active');
-            setTimeout(() => { overlay.style.display = 'none'; }, 300);
-        } else {
-            overlay.style.display = 'flex';
-            requestAnimationFrame(() => overlay.classList.add('active'));
-            setTimeout(() => { const input = safeEl('chat-input'); if (input) input.focus(); }, 100);
-        }
-    }
-    const chatOverlay = safeEl('chat-modal-overlay');
-    if (chatOverlay) chatOverlay.addEventListener('click', function(e) { if (e.target === this) toggleChatModal(); });
-
-    function sendChat() {
-        const input = document.getElementById('chat-input');
-        const text = input.value.trim();
-        if(!text) return;
-        addMsg(text, 'user');
-        input.value = '';
-        const msgId = 'bot-' + Date.now();
-        const chatBox = document.getElementById('chat-box');
-        const loadingDiv = document.createElement('div');
-        loadingDiv.id = msgId;
-        loadingDiv.className = 'msg bot';
-        loadingDiv.innerHTML = '<i class="fas fa-ellipsis-h fa-beat"></i>';
-        chatBox.appendChild(loadingDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-
-        const context = { level: CURRENT_USER.level || '', room: CURRENT_USER.room || '', subject: 'General' };
-        google.script.run.withSuccessHandler(res => {
-            const msgEl = document.getElementById(msgId);
-            if (res.success) msgEl.innerHTML = res.response.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-            else msgEl.innerHTML = '<span style="color:red;">ขออภัย ระบบขัดข้องชั่วคราว</span>';
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }).aiGeneralChat(`ข้อมูลของนักเรียนชื่อ ${CURRENT_USER.name}: ${text}`, context);
-    }
-
-    function addMsg(text, sender) {
-        const box = document.getElementById('chat-box');
-        const div = document.createElement('div');
-        div.className = `msg ${sender}`;
-        div.innerHTML = text;
-        box.appendChild(div);
-        box.scrollTop = box.scrollHeight;
-    }
-
-    function logout() {
-        Swal.fire({ title: 'ออกจากระบบ?', icon: 'warning', showCancelButton: true, confirmButtonText: 'ใช่', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#DC2626' }).then((result) => {
-            if (result.isConfirmed) {
-                localStorage.removeItem(getStudentCacheKey(CACHE_KEY));
-                localStorage.removeItem(getStudentCacheKey(CACHE_USER_KEY));
-                window.location.reload(); 
-            }
-        });
-    }
-
-    function showToast(msg) {
-        const t = document.getElementById('toast');
-        document.getElementById('toast-msg').innerText = msg;
-        t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 3000);
-    }
-  </script>
-</body>
-</html>
-
-        </div>
     </div>
 
     <script>
@@ -10518,26 +9615,49 @@ var DATA_CONTROLLER = new DataController();
         window.__AUTH_READY_STATE = 'pending';
         const SESSION_KEY = 'wrk_school_session'; // Define session key
 
-        // Do not initialize the app before both compatibility bridges and
-        // Supabase Auth session restoration are ready.
+        // Do not initialize the app before the Firebase bridge and Auth
+        // persistence are ready. Otherwise a restored teacher session can be
+        // mistaken for an anonymous user and all reads/writes appear denied.
         window.onload = function() {
             waitForBackendReady();
         };
 
         function waitForBackendReady(attempt = 0) {
             const bridgeReady = !!(window.google && google.script && google.script.run);
-            const authReady = !!window.supabaseAuthReady;
             const firebaseReady = !!(window.firebase && firebase.auth);
-            if (bridgeReady && firebaseReady && authReady) {
+            const supabaseReady = !!(window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__);
+            // GitHub/Supabase builds do not load the legacy Apps Script bridge.
+            // Waiting for google.script here made a valid OAuth callback time out
+            // and incorrectly return to the login screen.
+            if ((bridgeReady || supabaseReady) && firebaseReady) {
                 if (!window.__authBootstrapPromise) {
-                    // The auth bridge starts its bootstrap once while loading.
-                    // Reuse that promise so a PKCE callback is never exchanged twice.
-                    window.__authBootstrapPromise = window.__SUPABASE_AUTH_READY || window.supabaseAuthReady();
+                    window.__authBootstrapPromise = new Promise((resolve) => {
+                        let settled = false;
+                        let unsubscribe = null;
+                        const finish = (user) => {
+                            if (settled) return;
+                            settled = true;
+                            if (unsubscribe) unsubscribe();
+                            resolve(user || null);
+                        };
+                        const timeout = setTimeout(() => finish(firebase.auth().currentUser), 8000);
+                        unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+                            clearTimeout(timeout);
+                            finish(user);
+                        });
+                    });
                 }
-                window.__authBootstrapPromise.then((session) => {
-                    const user = session?.user || window.__SUPABASE_AUTH_USER || null;
-                    window.__FIREBASE_AUTH_USER = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-                    window.__AUTH_READY_STATE = user ? 'authenticated' : 'missing';
+                window.__authBootstrapPromise.then(async (user) => {
+                    // Supabase may finish processing the OAuth callback just
+                    // after the initial auth-state callback reports null.
+                    // Give its URL/session handler a short settling window
+                    // before deciding that the staff user is unauthenticated.
+                    if (!user && window.__SUPABASE_MODE__) {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        user = (window.firebase && window.firebase.auth) ? window.firebase.auth().currentUser : null;
+                    }
+                    window.__FIREBASE_AUTH_USER = user || null;
+                    window.__AUTH_READY_STATE = user ? (user.isAnonymous ? 'anonymous' : 'authenticated') : 'missing';
                     checkSession();
                 });
                 return;
@@ -10552,20 +9672,6 @@ var DATA_CONTROLLER = new DataController();
                 return;
             }
             setTimeout(() => waitForBackendReady(attempt + 1), 250);
-        }
-
-        function getAssistantLinkParams() {
-            const params = new URLSearchParams(window.location.search || '');
-            const isAssistant = params.get('assistant') === '1' || params.get('mode') === 'assistant';
-            const uid = (params.get('uid') || params.get('sid') || '').trim();
-            if (!isAssistant || !uid) return null;
-            return {
-                uid,
-                term: (params.get('term') || '').trim(),
-                subject: (params.get('subject') || params.get('subjectCode') || '').trim(),
-                level: (params.get('level') || '').trim(),
-                room: (params.get('room') || '').trim()
-            };
         }
 
         // --- A) Helper Functions (Session Isolation) ---
@@ -10604,60 +9710,9 @@ var DATA_CONTROLLER = new DataController();
             localStorage.removeItem(SESSION_KEY);
         }
 
-        async function loadSupabaseStaffProfile() {
-            const endpoint = 'https://jvyxnsokfpnepshyyzpg.functions.supabase.co/score-api';
-            const sessionResult = await window.__SUPABASE_CLIENT.auth.getSession();
-            const session = sessionResult && sessionResult.data && sessionResult.data.session;
-            if (!session || !session.access_token || !window.__AUTH_EMAIL) throw new Error('ไม่พบ Supabase session สำหรับโหลดโปรไฟล์');
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-                body: JSON.stringify({ action: 'profile', email: window.__AUTH_EMAIL })
-            });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.success === false || !result.data) {
-                console.error('Supabase direct profile bootstrap failed', { status: response.status, message: result.message || '' });
-                throw new Error(result.message || `โหลดโปรไฟล์ไม่สำเร็จ (${response.status})`);
-            }
-            console.info('Supabase direct profile bootstrap succeeded', { email: result.data.email, role: result.data.role });
-            const profile = result.data;
-            if (!profile.name) {
-                profile.name = window.__SUPABASE_AUTH_USER?.user_metadata?.full_name ||
-                               window.__SUPABASE_AUTH_USER?.user_metadata?.name ||
-                               (profile.role === 'admin' ? 'สุรเดช ธรรมประโชติ' : profile.username || 'ผู้ใช้งาน');
-            }
-            return profile;
-        }
-
         // --- B) Check Session (Updated) ---
         function checkSession() {
-            const assistantLink = getAssistantLinkParams();
-            if (assistantLink) {
-                clearSession();
-                setLoading(true, 'กำลังเปิดหน้าเช็คชื่อผู้ช่วย...');
-                google.script.run
-                    .withSuccessHandler((response) => {
-                        setLoading(false);
-                        if (response && response.success && response.user && response.user.role === 'attendance_assistant') {
-                            CURRENT_USER = response.user;
-                            CURRENT_USER.assistantLink = assistantLink;
-                            saveSession(CURRENT_USER);
-                            renderAppByRole();
-                        } else {
-                            showLogin();
-                            Swal.fire('เปิดลิงก์ไม่ได้', 'นักเรียนคนนี้ยังไม่ได้รับสิทธิ์ผู้ช่วยเช็คชื่อ หรือสิทธิ์หมดอายุ', 'error');
-                        }
-                    })
-                    .withFailureHandler((err) => {
-                        setLoading(false);
-                        showLogin();
-                        Swal.fire('เปิดลิงก์ไม่ได้', String(err), 'error');
-                    })
-                    .loginSystem(assistantLink.uid, assistantLink.uid);
-                return;
-            }
             const localUser = loadSession(); // ใช้ Helper ใหม่
-            console.error('CHECK_SESSION_STATE:' + JSON.stringify({ hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasAuthEmail: !!window.__AUTH_EMAIL, hasLocalUser: !!localUser, hasLocalEmail: !!(localUser?.email || localUser?.Email), localRole: localUser?.role || '' }));
 
             // กันเหนียว: ถ้ามี localStorage ค้างมาจากระบบเก่า ให้ลบทิ้ง
             if (localStorage.getItem(SESSION_KEY)) {
@@ -10665,30 +9720,20 @@ var DATA_CONTROLLER = new DataController();
             }
 
             if (localUser && localUser.id) {
-                console.error('CHECK_SESSION_BRANCH:local');
                 // Staff sessions must always be backed by the current Google account.
                 // A sessionStorage record alone must never reopen a teacher/admin screen,
                 // because it can belong to another Chrome profile or another email.
                 const localRole = String(localUser.role || '').toLowerCase();
-                const staffRole = ['admin', 'teacher', 'attendance_assistant'].includes(localRole);
+                const staffRole = ['admin', 'teacher'].includes(localRole);
                 const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-                const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
-                const authEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
+                const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
-                const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-                const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
-                const emailMismatch = staffRole && identityUser && (
-                    (localRole === 'admin' && (!isAdminEmail(authEmail) || savedEmail !== authEmail)) ||
+                const adminEmail = 'suradet.t@wrk.ac.th';
+                const emailMismatch = staffRole && firebaseUser && (
+                    (localRole === 'admin' && authEmail !== adminEmail) ||
                     (localRole !== 'admin' && savedEmail && savedEmail !== authEmail)
                 );
-                // A session from an older Google account must not block the
-                // current Supabase identity. Clear only this tab's legacy
-                // session, then restart the Supabase profile bootstrap.
-                if (emailMismatch && window.__SUPABASE_AUTH_USER) {
-                    clearSession();
-                    return checkSession();
-                }
-                if (staffRole && (!identityUser || (identityUser.isAnonymous && !window.__SUPABASE_AUTH_USER) || emailMismatch)) {
+                if (staffRole && (!firebaseUser || firebaseUser.isAnonymous || emailMismatch)) {
                     clearSession();
                     setLoading(false);
                     showLogin();
@@ -10727,23 +9772,33 @@ var DATA_CONTROLLER = new DataController();
                     clearSession();
                     showLogin();
                 }
-            } else if (window.__SUPABASE_AUTH_USER) {
-                console.error('CHECK_SESSION_BRANCH:supabase');
-                setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
-                loadSupabaseStaffProfile().then((normalizedUser) => {
-                    setLoading(false);
-                    CURRENT_USER = normalizedUser;
-                    saveSession(CURRENT_USER);
-                    renderAppByRole();
-                }).catch((err) => {
-                    setLoading(false);
-                    showLogin();
-                    console.warn('Supabase profile sync failed', err);
-                    if (typeof Swal !== 'undefined') Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(err.message || err), 'error');
-                });
             } else {
-                console.error('CHECK_SESSION_BRANCH:login');
-                showLogin();
+                // Supabase OAuth may have just completed and established an
+                // auth session before the app sessionStorage record exists.
+                // Resolve that session once so the callback can enter the
+                // same staff flow without requiring a second login click.
+                const callbackUser = window.__SUPABASE_MODE__ && window.__FIREBASE_AUTH_USER;
+                const supabaseSessionReady = window.__SUPABASE_MODE__ && window.__SUPABASE_SESSION_READY__;
+                if ((callbackUser && !callbackUser.isAnonymous || supabaseSessionReady) && typeof window.firebaseSignInWithGoogle === 'function') {
+                    setLoading(true, 'กำลังยืนยันบัญชี Google...');
+                    window.firebaseSignInWithGoogle().then((result) => {
+                        if (result && result.success && result.user) {
+                            CURRENT_USER = result.user;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            setLoading(false);
+                            showLogin();
+                        }
+                    }).catch((error) => {
+                        console.warn('SUPABASE_OAUTH_CALLBACK_FAILED', error);
+                        setLoading(false);
+                        showLogin();
+                    });
+                } else {
+                    // ไม่มี Session -> ไปหน้า Login
+                    showLogin();
+                }
             }
         }
 
@@ -10755,10 +9810,38 @@ var DATA_CONTROLLER = new DataController();
         async function handleAdminGoogleLogin() {
             try {
                 setLoading(true, 'กำลังตรวจสอบบัญชี Google...');
-                await window.supabaseSignInWithGoogle();
+                const result = await window.firebaseSignInWithGoogle();
+                if (result && result.redirecting) return;
+                setLoading(false);
+                if (result.needsSetup) {
+                    // Do not leave an unapproved Google identity authenticated
+                    // after the staff gate rejects it. A later reload must not
+                    // inherit that identity as a valid staff session.
+                    try { await firebase.auth().signOut(); } catch (signOutError) { console.warn('Unauthorized Google sign-out failed', signOutError); }
+                    Swal.fire('ยังไม่มีสิทธิ์ใช้งาน', `อีเมล ${result.email || ''} ยังไม่ได้เพิ่มโดยผู้ดูแลระบบ กรุณาให้แอดมินเพิ่มอีเมลนี้ใน Users ก่อน`, 'error');
+                    return;
+                }
+                CURRENT_USER = result.user;
+                saveSession(CURRENT_USER);
+                    renderAppByRole();
             } catch (error) {
                 setLoading(false);
-                Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
+                const code = String(error?.code || '');
+                if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+                    Swal.fire(
+                        'หน้าต่าง Google ถูกปิด',
+                        'หน้าต่างยืนยันตัวตนถูกปิดก่อนเสร็จสิ้น หากกำลังทดสอบบนเครื่องนี้ ให้ใช้ Local Test Browser; หากใช้ระบบจริง ให้เปิดผ่าน HTTPS และอนุญาต popup ของ Google',
+                        'warning'
+                    );
+                } else if (code === 'auth/popup-blocked') {
+                    Swal.fire(
+                        'เบราว์เซอร์บล็อกหน้าต่าง Google',
+                        'อนุญาต popup สำหรับเว็บไซต์นี้แล้วลองใหม่ หรือใช้ Local Test Browser สำหรับการทดสอบโดยไม่เชื่อม Firebase จริง',
+                        'warning'
+                    );
+                } else {
+                    Swal.fire('เข้าสู่ระบบไม่สำเร็จ', String(error.message || error), 'error');
+                }
             }
         }
 
@@ -10773,73 +9856,15 @@ var DATA_CONTROLLER = new DataController();
             try { const saved = await new Promise((resolve, reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).submitTeacherAccessRequest(result.value)); if (!saved?.success) throw new Error(saved?.message || 'ส่งคำขอไม่สำเร็จ'); await firebase.auth().signOut(); await Swal.fire('ส่งคำขอแล้ว', saved.message, 'success'); } catch (error) { await firebase.auth().signOut(); await Swal.fire('ส่งคำขอไม่สำเร็จ', String(error.message || error), 'error'); }
         }
 
-        // --- C) Handle Login (Updated) ---
-        function handleLogin(e) {
-            e.preventDefault();
-            const userEl = document.getElementById('login-user');
-            const passEl = document.getElementById('login-pass');
-            if(!userEl || !passEl) return;
-
-            const user = userEl.value.trim();
-            const pass = passEl.value.trim();
-            if(!user || !pass) {
-                Swal.fire('แจ้งเตือน', 'กรุณากรอกข้อมูลให้ครบถ้วน', 'warning');
-                return;
-            }
-
-            setLoading(true, 'กำลังตรวจสอบข้อมูล...');
-            google.script.run
-                .withSuccessHandler((response) => {
-                    setLoading(false);
-                    if (response.success) {
-                        const role = String(response.user && response.user.role || '').toLowerCase();
-                        if (['admin', 'teacher', 'attendance_assistant'].includes(role)) {
-                            clearSession();
-                            Swal.fire('กรุณาเข้าสู่ระบบด้วย Google', 'บัญชีเจ้าหน้าที่ต้องใช้ Google ตามอีเมลที่ผู้ดูแลระบบกำหนด เพื่อป้องกันการใช้ session ของผู้ใช้อื่น', 'info');
-                            return;
-                        }
-                        CURRENT_USER = response.user; 
-                        
-                        // [CHANGE] ใช้ saveSession แทน localStorage.setItem
-                        saveSession(CURRENT_USER);
-                        
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'ยินดีต้อนรับ',
-                            text: `สวัสดีครับ/ค่ะ ${CURRENT_USER.name}`,
-                            timer: 1500,
-                            showConfirmButton: false
-                        }).then(() => {
-                            renderAppByRole();
-                        });
-                    } else {
-                        Swal.fire('เข้าสู่ระบบไม่สำเร็จ', response.message, 'error');
-                        passEl.value = '';
-                    }
-                })
-                .withFailureHandler((error) => {
-                    setLoading(false);
-                    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้: ' + error, 'error');
-                })
-                .loginSystem(user, pass);
-        }
-
         // 3. Render หน้าจอตามสิทธิ์ (FIXED FOR TEACHER ROLE)
         function renderAppByRole() {
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             const firebaseUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-            const identityUser = window.__SUPABASE_AUTH_USER || firebaseUser;
-            const identityEmail = String(identityUser && identityUser.email || '').trim().toLowerCase();
+            const firebaseEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
             const expectedEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
-            const adminEmails = ['suradet.t@wrk.ac.th', 'suradett.wrk@eisth.org'];
-            const isAdminEmail = (e) => adminEmails.includes(String(e || '').trim().toLowerCase());
-            const identityOk = !['admin', 'teacher', 'attendance_assistant'].includes(role) || (
-                identityUser && (!identityUser.isAnonymous || !!window.__SUPABASE_AUTH_USER) && (
-                    (role === 'admin' && isAdminEmail(identityEmail) && expectedEmail === identityEmail) ||
-                    (role !== 'admin' && expectedEmail === identityEmail)
-                )
+            const identityOk = ['admin', 'teacher'].includes(role) && (
+                firebaseUser && !firebaseUser.isAnonymous && ((role === 'admin' && firebaseEmail === 'suradet.t@wrk.ac.th') || (role !== 'admin' && expectedEmail === firebaseEmail))
             );
-            console.error('IDENTITY_CHECK_STATE:' + JSON.stringify({ role, hasIdentity: !!identityUser, hasSupabaseUser: !!window.__SUPABASE_AUTH_USER, hasExpectedEmail: !!expectedEmail, emailsEqual: !!expectedEmail && expectedEmail === identityEmail, identityOk }));
             if (!identityOk) {
                 clearSession();
                 CURRENT_USER = null;
@@ -10848,17 +9873,14 @@ var DATA_CONTROLLER = new DataController();
                 console.warn('STAFF_RENDER_BLOCKED: no matching Google Auth identity.');
                 return;
             }
-            window.__AUTH_READY_STATE = ['admin', 'teacher', 'attendance_assistant'].includes(role) ? 'verified' : 'authenticated';
+            window.__AUTH_READY_STATE = 'verified';
             const loginPage = document.getElementById('page-login');
             const appPage = document.getElementById('page-app');
             const adminContainer = document.getElementById('container-admin');
-            const studentContainer = document.getElementById('container-student');
-
             if(loginPage) loginPage.classList.add('hidden');
             if(appPage) appPage.classList.remove('hidden');
             
-            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teacher' || CURRENT_USER.role === 'attendance_assistant') {
-                if(studentContainer) studentContainer.classList.add('hidden');
+            if (CURRENT_USER.role === 'admin' || CURRENT_USER.role === 'teacher') {
                 if(adminContainer) adminContainer.classList.remove('hidden');
                 const initKey = [CURRENT_USER.id || '', CURRENT_USER.role || '', window.CURRENT_SERVER_TERM || ''].join('_');
                 if (window.__ADMIN_INIT_DONE_FOR_USER_TERM !== initKey) {
@@ -10866,12 +9888,13 @@ var DATA_CONTROLLER = new DataController();
                     if(typeof initAdminDashboard === 'function') initAdminDashboard();
                 }
             } else {
-                Swal.fire('ยังไม่เปิดใช้งาน', 'ขณะนี้ยังไม่เปิดหน้า Student Portal สำหรับนักเรียน', 'info');
-                resetToLogin();
-                return;
+                clearSession();
+                CURRENT_USER = null;
                 if(adminContainer) adminContainer.classList.add('hidden');
-                if(studentContainer) studentContainer.classList.remove('hidden');
-                if(typeof initStudentDashboard === 'function') initStudentDashboard();
+                if(appPage) appPage.classList.add('hidden');
+                showLogin();
+                setLoading(false);
+                Swal.fire('ไม่มีสิทธิ์ใช้งาน', 'ระบบนี้เปิดให้เฉพาะครูและผู้ดูแลระบบเท่านั้น', 'error');
             }
         }
 
@@ -10894,9 +9917,19 @@ var DATA_CONTROLLER = new DataController();
         }
 
         // --- D) Reset To Login (Updated) ---
-        function resetToLogin() {
+        async function resetToLogin() {
             // [CHANGE] ใช้ clearSession แทน localStorage.removeItem
             clearSession();
+
+            // Clear the provider session as well as the app session. Otherwise
+            // Firebase can keep the previous Google identity authenticated
+            // after logout, which makes a later write/read look like a stale
+            // staff session even though the UI returned to the login screen.
+            try {
+                if (window.firebase && firebase.auth && firebase.auth().currentUser) await firebase.auth().signOut();
+            } catch (error) {
+                console.warn('Firebase sign-out failed during logout', error);
+            }
             
             CURRENT_USER = null;
             window.__AUTH_READY_STATE = 'missing';
@@ -10908,16 +9941,8 @@ var DATA_CONTROLLER = new DataController();
             const adminContainer = document.getElementById('container-admin');
             if(adminContainer) adminContainer.classList.add('hidden');
             
-            const studentContainer = document.getElementById('container-student');
-            if(studentContainer) studentContainer.classList.add('hidden');
-
             const loginPage = document.getElementById('page-login');
             if(loginPage) loginPage.classList.remove('hidden');
-
-            const userEl = document.getElementById('login-user');
-            const passEl = document.getElementById('login-pass');
-            if(userEl) userEl.value = '';
-            if(passEl) passEl.value = '';
 
             setLoading(false);
         }
