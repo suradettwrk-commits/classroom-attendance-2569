@@ -7442,10 +7442,13 @@
             const room = String(s.room || s.Room || '').trim();
             return [`${level}|${room}`, { level, room }];
         }).filter(([, value]) => value.level && value.room))].map(([, value]) => value);
-        // Admins can inspect every class represented by the shared student
-        // database. Teachers remain restricted to their configured classes.
+        // Admins can inspect every class configured for the selected subject.
+        // Do not derive this from the student list: that loses the subject ↔
+        // class permission mapping and makes every subject look identical.
+        // Teachers remain restricted to their own configured classes.
+        const adminSubjectClasses = usableClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const subjectClasses = role === 'admin'
-            ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
+            ? (adminSubjectClasses.length ? adminSubjectClasses : (adminStudentClasses.length ? adminStudentClasses : usableClasses))
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
         // On a cold production session the shared student snapshot can arrive

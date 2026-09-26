@@ -139,9 +139,15 @@
     if (!root || !raw) return raw;
     return normalizedTerm(raw, root);
   }
+  // Firebase contains both the display label (`1/2569`) and the historical
+  // Terms.TermID timestamp. Treat every record as belonging to the same
+  // canonical term at the read boundary; never rewrite the source rows here.
+  function recordTerm(row) {
+    return row && (row.Term || row.TermID || row.term || row.termId);
+  }
   function subject(row, root) { return { code: text(row.SubjectCode), name: text(row.SubjectName), term: normalizedTerm(row.Term, root), status: text(row.Status), teacher: text(row.Teacher), classes: text(row.Classes) }; }
-  function assignment(row, root) { return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
-  function attendance(row, root) { return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
+  function assignment(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
+  function attendance(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
   function score(row) {
     return {
       id: text(row.ScoreID),
@@ -262,10 +268,14 @@
     return Promise.race([call(name, args), deadline]).finally(() => clearTimeout(timer));
   }
   async function readTermScoped(pathName, selectedTerm, termRoot) {
-    const queryValue = termQueryValue(termRoot || { terms: {} }, selectedTerm, pathName);
-    const scoped = await db.ref(`/${pathName}`).orderByChild('Term').equalTo(queryValue).once('value');
-    const scopedValue = scoped.val() || {};
-    // Keep compatibility with legacy rows that do not have Term yet.
+    const root = termRoot || { terms: {} };
+    const queryValues = termQueryValues(root, selectedTerm, pathName);
+    const snapshots = await Promise.all(queryValues.map((value) =>
+      db.ref(`/${pathName}`).orderByChild('Term').equalTo(value).once('value')
+    ));
+    const scopedValue = {};
+    snapshots.forEach((snapshot) => Object.assign(scopedValue, snapshot.val() || {}));
+    // Keep compatibility with legacy rows that have no indexed Term field.
     return Object.keys(scopedValue).length ? scopedValue : ((await db.ref(`/${pathName}`).once('value')).val() || {});
   }
   // Score entry only needs these nodes. Keeping attendance, audit, users and
@@ -358,7 +368,7 @@
       readTermScoped('students', selected, { terms }),
       readTermScoped('assignments', selected, { terms }),
       db.ref('/teacherClasses').once('value').then((snapshot) => snapshot.val() || {}),
-      db.ref('/attendance').orderByChild('Term').equalTo(termQueryValue({ terms }, selected, 'attendance')).once('value').then((snapshot) => snapshot.val() || {})
+      Promise.all(termQueryValues({ terms }, selected, 'attendance').map((value) => db.ref('/attendance').orderByChild('Term').equalTo(value).once('value'))).then((snapshots) => Object.assign({}, ...snapshots.map((snapshot) => snapshot.val() || {})))
     ]);
     return { students, assignments, terms, teacherClasses, attendance };
   }
@@ -697,10 +707,10 @@
     const allowedClasses = scopedTeacherClasses.map((r) => ({ subject: text(r.SubjectCode || r.subjectCode), level: text(r.Level || r.level), room: text(r.Room || r.room) })).filter((r) => r.subject && r.level && r.room);
     const isAllowedStudent = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room));
     const isAllowedAssignment = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room) && x.subject === text(r.SubjectCode || r.subjectCode));
-    const students = values('students', root).filter((r) => termMatches(r.Term) && isAllowedStudent(r)).map((r) => ({ ...student(r), term: selectedTerm }));
-    const subjects = values('subjects', root).filter((r) => termMatches(r.Term, root) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
-    const assignments = values('assignments', root).filter((r) => termMatches(r.Term) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r), term: selectedTerm }));
-    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(r.Term)).length;
+    const students = values('students', root).filter((r) => termMatches(recordTerm(r)) && isAllowedStudent(r)).map((r) => ({ ...student(r, root), term: selectedTerm }));
+    const subjects = values('subjects', root).filter((r) => termMatches(recordTerm(r)) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
+    const assignments = values('assignments', root).filter((r) => termMatches(recordTerm(r)) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r, root), term: selectedTerm }));
+    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(recordTerm(r))).length;
     const users = String(currentUser && currentUser.role).toLowerCase() === 'admin' ? values('users', root).map(user) : [];
     const combos = [...new Map(allowedClasses.map((x) => [`${x.subject}|${x.level}|${x.room}`, { subject: x.subject, level: x.level, room: x.room }])).values()];
     return { success: true, data: { meta: { term: selectedTerm, requestedTerm: selectedTerm, generatedAt: Date.now(), termAssignmentCount, counts: { students: students.length, subjects: subjects.length, assignments: assignments.length } }, students, subjects, assignments, users, combos, levels: [...new Set(students.map((r) => r.level).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), rooms: [...new Set(students.map((r) => r.room).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), attendance: values('attendance', root).map((r) => attendance(r, root)), scores: values('scores', root).map(score), teacherClasses: scopedTeacherClasses.map((r) => teacherClass(r, root)), terms: values('terms', root), settings: { ...rawMap(root.settings), ...rawMap(root.systemSettings) } } };
@@ -1050,10 +1060,10 @@
       const teacherScope = values('teacherClasses', root).filter((r) => matchesTerm(r.TermID || r.Term || r.term, selected, root) && text(r.TeacherID || r.teacherId) === text(arg.user && arg.user.id) && text(r.Status || r.status).toLowerCase() !== 'inactive');
       const allowedStudent = (r) => role === 'admin' || teacherScope.some((x) => text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
       const allowedAssignment = (r) => role === 'admin' || teacherScope.some((x) => text(x.SubjectCode || x.subjectCode) === text(r.SubjectCode) && text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedStudent(r));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedStudent(r));
       const studentIds = new Set(students.map((r) => text(r.StudentID)));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedAssignment(r));
-      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(r.Term, selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedAssignment(r));
+      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
       const date = text(arg.date);
       const dayRows = date ? attendanceRows.filter((r) => text(r.Date).slice(0, 10) === date) : attendanceRows;
       const status = (value) => text(value).toLowerCase();
@@ -1075,11 +1085,11 @@
     }
     if (name === 'loadScoresGrid') {
       const selected = activeTerm(root, arg.term);
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
       const assignmentIds = new Set(assignments.map((a) => a.id)); const studentIds = new Set(students.map((s) => s.id)); const scores = {};
       const orphanScores = [];
-      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
+      values('scores', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
         const assignmentId = text(r.AssignmentID || r.assignmentId);
         if (assignmentIds.has(assignmentId)) scores[`${assignmentId}_${text(r.StudentID)}`] = score(r);
         else orphanScores.push({ scoreId: text(r.ScoreID || r.scoreId), assignmentId, studentId: text(r.StudentID || r.studentId), subjectCode: text(r.SubjectCode || r.subjectCode), term: text(r.TermID || r.Term || r.term), score: r.Score ?? r.score ?? '', isSubmitted: r.IsSubmitted ?? r.isSubmitted ?? '' });
