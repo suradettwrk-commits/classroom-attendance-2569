@@ -2388,6 +2388,13 @@
         }
         if (subjects && subjects.length > 0) {
             subjects = subjects.map(normalizeSubjectRecord).filter(subject => subject.code);
+            // Every staff tab must use the same permission source. The live
+            // subject catalog is global, but a teacher may only see subjects
+            // present in that teacher's configured class combinations.
+            if (currentRole === 'teacher' && window.CLASS_COMBOS.length) {
+                const allowedCodes = new Set(window.CLASS_COMBOS.map(x => String(x.subject || '').trim()).filter(Boolean));
+                subjects = subjects.filter(subject => allowedCodes.has(String(subject.code).trim()));
+            }
             // [CRUD FIX] ใช้ getSubjectDisplayLabel เพื่อให้แน่ใจว่าแสดงผล "รหัสวิชา ชื่อวิชา" เสมอ
             const opts = subjects.map(s => `<option value="${s.code}">${getSubjectDisplayLabel(s)}</option>`).join('');
             ['att-subject', 'sc-subject', 'asn-subject', 'grading-subject'].forEach(id => { 

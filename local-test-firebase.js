@@ -5,8 +5,8 @@
   if (new URLSearchParams(window.location.search || '').get('localRole') === 'teacher') {
     rootData.authProfiles = rootData.authProfiles || {};
     rootData.authProfiles['local-teacher-uid'] = {
-      UserID: 'teacher-1', Email: 'teacher@example.test', Role: 'teacher', Status: 'Active',
-      DisplayName: 'ครูทดสอบ', Name: 'ครูทดสอบ'
+      UserID: 'USR-20260616-144217', Email: 'suradett.wrk@eisth.org', Role: 'teacher', Status: 'Active',
+      DisplayName: 'ครูสุรเดช ธรรมประโชติ', Name: 'ครูสุรเดช ธรรมประโชติ'
     };
   }
   const listeners = [];
@@ -64,7 +64,7 @@
     signInWithPopup() {
       const role = new URLSearchParams(window.location.search || '').get('localRole') || 'admin';
       authUser = role === 'teacher'
-        ? { uid: 'local-teacher-uid', isAnonymous: false, email: 'teacher@example.test', displayName: 'ครูทดสอบ', photoURL: '' }
+        ? { uid: 'local-teacher-uid', isAnonymous: false, email: 'suradett.wrk@eisth.org', displayName: 'ครูสุรเดช ธรรมประโชติ', photoURL: '' }
         : { uid: 'local-admin-uid', isAnonymous: false, email: 'suradet.t@wrk.ac.th', displayName: 'ผู้ดูแลระบบทดสอบ', photoURL: '' };
       auth.currentUser = authUser;
       try { localStorage.setItem('__LOCAL_TEST_AUTH__', JSON.stringify(authUser)); } catch (error) {}
