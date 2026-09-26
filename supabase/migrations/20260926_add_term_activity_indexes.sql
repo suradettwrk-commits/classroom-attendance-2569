@@ -1,5 +1,7 @@
 -- Performance support for the term-scoped compatibility reads.
 -- Safe to apply after the RLS migration; no data or authorization changes.
+create index if not exists idx_app_users_lower_email
+  on public.app_users (lower(email));
 create index if not exists idx_students_term_level_room
   on public.students (term_id, level, room);
 create index if not exists idx_teacher_classes_term_teacher

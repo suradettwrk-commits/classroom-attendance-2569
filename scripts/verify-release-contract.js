@@ -12,7 +12,8 @@ const checks = [
   ['dashboard warning is beyond the 30s read circuit breaker', /setTimeout\(\(\) => \{[\s\S]*Dashboard stats still running[\s\S]*\}, 35000\)/],
   ['student writes retain a durable timeout', /STUDENT_WRITE_CALL_TIMEOUT_MS\s*=\s*45000/],
   ['term-scoped activity reads exist', /const termScoped = \['assignments', 'attendance', 'scores'\]/],
-  ['activity indexes are part of the migration', /idx_assignments_term_subject_class[\s\S]*idx_attendance_term_date_class[\s\S]*idx_scores_term_assignment_student/],
+  ['activity reads use bounded projections', /const projections = \{[\s\S]*assignments:[\s\S]*attendance:[\s\S]*scores:/],
+  ['activity indexes are part of the migration', /idx_app_users_lower_email[\s\S]*idx_assignments_term_subject_class[\s\S]*idx_attendance_term_date_class[\s\S]*idx_scores_term_assignment_student/],
   ['RLS migration keeps staff-only policy', /create policy staff_select_/],
 ];
 

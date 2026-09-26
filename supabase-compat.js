@@ -86,6 +86,14 @@
   async function readAllRows(name, termCandidates) {
     const rows = [];
     const pageSize = 500;
+    // Activity tables can carry a large legacy_data JSON payload. The UI only
+    // needs the canonical columns below; selecting the whole row makes a cold
+    // PostgREST/RLS read much more likely to hit the server statement budget.
+    const projections = {
+      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,level,room,status,due_date,display_order',
+      attendance: 'record_id,term_id,teacher_class_id,class_id,student_id,subject_code,attendance_date,status,note,recorder,timestamp,level,room',
+      scores: 'score_id,term_id,assignment_id,student_id,teacher_class_id,class_id,subject_code,level,room,score,is_submitted,timestamp'
+    };
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
     // compatibility layer is always consumed for one active term at a time,
@@ -101,7 +109,7 @@
     // the compatibility layer read-only and allows both aliases to coexist.
     for (const termValue of terms) {
       for (let offset = 0; ; offset += pageSize) {
-        let query = client.from(tableName(name)).select('*');
+        let query = client.from(tableName(name)).select(projections[name] || '*');
         if (termValue) query = query.eq('term_id', termValue);
         const { data, error } = await query.range(offset, offset + pageSize - 1);
         if (error) return { data: null, error };
