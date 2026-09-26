@@ -9960,6 +9960,7 @@ var DATA_CONTROLLER = new DataController();
             .concat(rows(liveDb.combos))
             .concat(rows(liveDb.classCombos))
             .concat(rows(window.CLASS_COMBOS))
+            .concat(rows(window.TEACHER_CLASSES_CACHE))
             // Local Test exposes the exact backup snapshot. This fallback is
             // local-only; production continues to use Firebase bootstrap and
             // realtime data above.
