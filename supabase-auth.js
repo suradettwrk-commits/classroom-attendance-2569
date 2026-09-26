@@ -26,8 +26,24 @@
     const email = String(authUser.email || '').trim().toLowerCase();
     const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
     if (profileError) throw profileError;
-    if (match && ['admin', 'teacher', 'attendance_assistant'].includes(String(match.Role || match.role || '').toLowerCase()) && String(match.Status || match.status || '').toLowerCase() !== 'inactive') {
-      return { success: true, user: { id: match.UserID || match.userId || match.user_id, username: match.Username || match.username || email, name: match.Name || match.name || email, role: String(match.Role || match.role).toLowerCase(), email, imageUrl: authUser.user_metadata?.avatar_url || '', authUser } };
+    const legacy = match && match.legacy_data && typeof match.legacy_data === 'object' ? match.legacy_data : {};
+    const profile = { ...legacy, ...(match || {}) };
+    const pick = (...keys) => keys.map(key => profile[key]).find(value => value !== undefined && value !== null && String(value).trim() !== '');
+    const role = String(pick('Role', 'role') || '').toLowerCase();
+    const status = String(pick('Status', 'status') || '').toLowerCase();
+    if (match && ['admin', 'teacher', 'attendance_assistant'].includes(role) && status !== 'inactive') {
+      return { success: true, user: {
+        id: pick('UserID', 'userId', 'user_id', 'id'),
+        username: pick('Username', 'username') || email,
+        name: pick('Name', 'name', 'fullName', 'full_name') || authUser.user_metadata?.full_name || email,
+        prefix: pick('Prefix', 'prefix') || '',
+        lastName: pick('LastName', 'lastName', 'last_name') || '',
+        position: pick('Position', 'position') || 'ครูผู้สอน',
+        school: pick('School', 'school') || '',
+        group: pick('Group', 'group') || '',
+        role, status: pick('Status', 'status') || 'Active', email,
+        imageUrl: authUser.user_metadata?.avatar_url || '', authUser
+      } };
     }
     return { success: true, needsSetup: true, uid: authUser.id, email, name: authUser.user_metadata?.full_name || email };
   };
