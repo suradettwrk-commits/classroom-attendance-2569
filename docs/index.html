@@ -5013,17 +5013,26 @@ var DATA_CONTROLLER = new DataController();
                     const subjectEl = getEl(subjectId);
                     if (subjectEl && typeof subjectEl.refreshCascade === 'function') subjectEl.refreshCascade();
                     if (tab === 'scores') {
-                        const scoreSubject = getEl('sc-subject');
-                        const scoreLevel = getEl('sc-level');
-                        const scoreRoom = getEl('sc-room');
-                        if (scoreSubject && scoreLevel && scoreRoom && scoreSubject.value && scoreLevel.value && scoreRoom.value) {
-                            // The scoped dropdown refresh can replace a stale
-                            // room from the previous tab/session. Start the
-                            // authoritative score read only after those values
-                            // have been normalized, so an old response cannot
-                            // leave the table empty for the newly selected room.
-                            SCORES_MANAGER.fetchData();
-                        }
+                        // Cascade normalization is synchronous, but the shared
+                        // bootstrap can finish one tick later. Retry briefly so
+                        // opening the tab loads the complete score grid without
+                        // requiring the user to press "โหลดข้อมูลใหม่".
+                        const loadScoresWhenReady = (attempt = 0) => {
+                            const scoreSubject = getEl('sc-subject');
+                            const scoreLevel = getEl('sc-level');
+                            const scoreRoom = getEl('sc-room');
+                            if (scoreSubject && scoreLevel && scoreRoom && scoreSubject.value && scoreLevel.value && scoreRoom.value) {
+                                // Opening the tab must use the same complete
+                                // read path as the explicit refresh button.
+                                // The realtime listener can otherwise attach
+                                // before the local/server snapshot is ready and
+                                // leave only the student shell visible.
+                                SCORES_MANAGER.fetchData(0, { forceServer: true });
+                                return;
+                            }
+                            if (attempt < 10) setTimeout(() => loadScoresWhenReady(attempt + 1), 120);
+                        };
+                        loadScoresWhenReady();
                     }
                 };
                 if (typeof window.firebaseSubscribeTermData === 'function') {
@@ -9620,6 +9629,8 @@ var DATA_CONTROLLER = new DataController();
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
         const studentSources = []
             .concat(rows(liveDb.students))
+            .concat(rows(boot.students))
+            .concat(rows(boot.studentsLite))
             .concat(window.__LOCAL_TEST_MODE__ ? rows(window.__LOCAL_TEST_DATA__?.students) : []);
         const adminStudentClasses = [...new Map(studentSources.map(s => {
             const level = String(s.level || s.Level || '').trim();
@@ -9629,7 +9640,7 @@ var DATA_CONTROLLER = new DataController();
         // Admins can inspect every class represented by the shared student
         // database. Teachers remain restricted to their configured classes.
         const subjectClasses = role === 'admin'
-            ? adminStudentClasses
+            ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const levelValues = [...new Set(subjectClasses.map(classLevel).filter(Boolean))];
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
