@@ -1695,18 +1695,20 @@ window.supabaseConfig = {
     return { success: false, redirecting: true };
   }
 
-  window.firebaseSignInWithGoogle = async function () {
+  window.firebaseSignInWithGoogle = async function (options = {}) {
     const supabase = window.__SUPABASE_CLIENT__;
     const hash = String(window.location.hash || '');
     const hasOAuthCallback = /(?:^|#|&)access_token=/.test(hash) || /(?:^|#|&)code=/.test(hash);
     const bridgeUser = window.firebase && window.firebase.auth ? window.firebase.auth().currentUser : null;
     const current = (supabase.auth && supabase.auth.currentUser) || bridgeUser;
     // First click starts OAuth immediately; callback/restore resolves the session.
-    if (!current && !hasOAuthCallback) return redirectToGoogle();
-
     const sessionResult = await supabase.auth.getSession();
     const authUser = sessionResult.data?.session?.user || supabase.auth.currentUser;
-    if (!authUser) return redirectToGoogle();
+    if (!authUser) {
+      if (options.revalidateOnly) return { success: false, noSession: true };
+      if (!current && !hasOAuthCallback) return redirectToGoogle();
+      return redirectToGoogle();
+    }
 
     const email = String(authUser.email || '').trim().toLowerCase();
     const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
@@ -9925,9 +9927,24 @@ var DATA_CONTROLLER = new DataController();
                 const authEmail = String(firebaseUser && firebaseUser.email || '').trim().toLowerCase();
                 const savedEmail = String(localUser.email || localUser.Email || '').trim().toLowerCase();
                 const adminEmail = 'suradet.t@wrk.ac.th';
-                if (staffRole && window.__SUPABASE_MODE__ && !firebaseUser && window.__AUTH_READY_STATE === 'pending') {
+                if (staffRole && window.__SUPABASE_MODE__ && !firebaseUser) {
                     setLoading(true, 'กำลังกู้คืนบัญชี Google...');
-                    setTimeout(checkSession, 350);
+                    window.firebaseSignInWithGoogle({ revalidateOnly: true }).then((result) => {
+                        if (result && result.success && result.user) {
+                            CURRENT_USER = result.user;
+                            saveSession(CURRENT_USER);
+                            renderAppByRole();
+                        } else {
+                            clearSession();
+                            setLoading(false);
+                            showLogin();
+                        }
+                    }).catch((error) => {
+                        console.warn('SUPABASE_SESSION_RESTORE_FAILED', error);
+                        clearSession();
+                        setLoading(false);
+                        showLogin();
+                    });
                     return;
                 }
                 const emailMismatch = staffRole && firebaseUser && (
