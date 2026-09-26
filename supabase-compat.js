@@ -104,7 +104,7 @@
     // needs the canonical columns below; selecting the whole row makes a cold
     // PostgREST/RLS read much more likely to hit the server statement budget.
     const projections = {
-      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,due_date,level,room,status,legacy_data',
+      assignments: 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,due_date,level,room,status',
       attendance: 'record_id,term_id,student_id,subject_code,attendance_date,status,note,recorder,legacy_data',
       scores: 'score_id,term_id,assignment_id,student_id,subject_code,score,is_submitted,legacy_data'
     };
