@@ -18,7 +18,11 @@
     const token = await getAccessToken();
     const response = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` }, body:JSON.stringify({ action, ...payload }) });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success === false) throw new Error(result.message || `Supabase ${response.status}`);
+    if (!response.ok || result.success === false) {
+      console.error('Supabase API request failed', { action, status: response.status, message: result.message || '' });
+      throw new Error(result.message || `Supabase ${response.status}`);
+    }
+    console.info('Supabase API request succeeded', { action });
     return result;
   };
   let success = null, failure = null;

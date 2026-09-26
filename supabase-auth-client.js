@@ -33,7 +33,9 @@
       });
       const body = await response.text();
       if (!response.ok) { console.error('Supabase PKCE exchange failed', response.status, body); return null; }
-      return writeSession(JSON.parse(body));
+      const session = JSON.parse(body);
+      console.info('Supabase PKCE exchange succeeded', { hasAccessToken: !!session.access_token, hasRefreshToken: !!session.refresh_token, hasUser: !!session.user });
+      return writeSession(session);
     } catch (error) {
       console.error('Supabase PKCE exchange exception', String(error));
       return null;
@@ -72,9 +74,14 @@
     if (session?.expires_at && session.expires_at * 1000 < Date.now() + 60000) session = await refreshSession(session);
     if (!session?.access_token) return publish(null);
     const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: PUBLIC_KEY, Authorization: `Bearer ${session.access_token}` } });
-    if (!response.ok) return writeSession(null);
+    if (!response.ok) {
+      console.error('Supabase user verification failed', response.status, await response.text().catch(() => ''));
+      return writeSession(null);
+    }
     const user = await response.json();
-    return publish({ ...session, user });
+    const verified = publish({ ...session, user });
+    console.info('Supabase Auth ready', { email: window.__AUTH_EMAIL, userId: user?.id || '' });
+    return verified;
   };
   window.supabaseSignInWithGoogle = async function () {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;

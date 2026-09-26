@@ -301,7 +301,11 @@
                     .withSuccessHandler((serverUser) => {
                         setLoading(false);
                         const normalizedUser = (serverUser && serverUser.success && serverUser.data) ? serverUser.data : serverUser;
-                        if (!normalizedUser || !normalizedUser.id) { showLogin(); return; }
+                if (!normalizedUser || !normalizedUser.id) {
+                    console.error('Supabase profile bootstrap returned no user', { email: window.__AUTH_EMAIL, response: serverUser });
+                    showLogin();
+                    return;
+                }
                         CURRENT_USER = normalizedUser;
                         saveSession(CURRENT_USER);
                         renderAppByRole();

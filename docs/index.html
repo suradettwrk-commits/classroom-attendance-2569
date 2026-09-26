@@ -1489,7 +1489,7 @@
 
 </script>
 
-<script src="./supabase-auth-client.js?v=oauth-cache-fix-20260926"></script>
+<script src="./supabase-auth-client.js?v=oauth-debug-20260926"></script>
 <script>
 /* Supabase score client. Supabase Auth is preferred; Firebase is temporary fallback. */
 (function () {
@@ -1511,7 +1511,11 @@
     const token = await getAccessToken();
     const response = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${token}` }, body:JSON.stringify({ action, ...payload }) });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success === false) throw new Error(result.message || `Supabase ${response.status}`);
+    if (!response.ok || result.success === false) {
+      console.error('Supabase API request failed', { action, status: response.status, message: result.message || '' });
+      throw new Error(result.message || `Supabase ${response.status}`);
+    }
+    console.info('Supabase API request succeeded', { action });
     return result;
   };
   let success = null, failure = null;
@@ -10683,7 +10687,11 @@ var DATA_CONTROLLER = new DataController();
                     .withSuccessHandler((serverUser) => {
                         setLoading(false);
                         const normalizedUser = (serverUser && serverUser.success && serverUser.data) ? serverUser.data : serverUser;
-                        if (!normalizedUser || !normalizedUser.id) { showLogin(); return; }
+                if (!normalizedUser || !normalizedUser.id) {
+                    console.error('Supabase profile bootstrap returned no user', { email: window.__AUTH_EMAIL, response: serverUser });
+                    showLogin();
+                    return;
+                }
                         CURRENT_USER = normalizedUser;
                         saveSession(CURRENT_USER);
                         renderAppByRole();
