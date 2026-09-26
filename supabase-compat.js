@@ -53,11 +53,29 @@
   const listeners = [];
 
   function tableName(name) { return tableMap[name] || name; }
+  function activeTermHint() {
+    const fromWindow = text(window.CURRENT_SERVER_TERM);
+    if (fromWindow) return fromWindow;
+    try {
+      const fromStorage = text(localStorage.getItem('CURRENT_SERVER_TERM') || localStorage.getItem('ACTIVE_TERM'));
+      if (fromStorage) return fromStorage;
+    } catch (error) {}
+    return text(new URL(window.location.href).searchParams.get('term'));
+  }
   async function readAllRows(name) {
     const rows = [];
     const pageSize = 1000;
+    // These tables grow with every lesson and score entry. Reading the whole
+    // history on every page load causes PostgREST statement timeouts. The
+    // compatibility layer is always consumed for one active term at a time,
+    // so keep the same legacy shape while restricting the database read to
+    // that term. This is read-only and does not alter stored data.
+    const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
+    const term = termScoped ? activeTermHint() : '';
     for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await client.from(tableName(name)).select('*').range(offset, offset + pageSize - 1);
+      let query = client.from(tableName(name)).select('*');
+      if (term) query = query.eq('term_id', term);
+      const { data, error } = await query.range(offset, offset + pageSize - 1);
       if (error) return { data: null, error };
       const page = data || [];
       rows.push(...page);
