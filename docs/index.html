@@ -140,7 +140,7 @@ window.supabaseConfig = {
   }
   async function readAllRows(name, termCandidates) {
     const rows = [];
-    const pageSize = 1000;
+    const pageSize = 500;
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
     // compatibility layer is always consumed for one active term at a time,
@@ -148,16 +148,22 @@ window.supabaseConfig = {
     // that term. This is read-only and does not alter stored data.
     const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
     const term = termScoped ? activeTermHint() : '';
-    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [];
-    for (let offset = 0; ; offset += pageSize) {
-      let query = client.from(tableName(name)).select('*');
-      if (terms.length > 1) query = query.in('term_id', terms);
-      else if (terms.length === 1) query = query.eq('term_id', terms[0]);
-      const { data, error } = await query.range(offset, offset + pageSize - 1);
-      if (error) return { data: null, error };
-      const page = data || [];
-      rows.push(...page);
-      if (page.length < pageSize) break;
+    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [''];
+    if (termScoped && !terms.length) return { data: [], error: null };
+    // Avoid one large IN(...) statement. On the live dataset that query can
+    // exceed PostgREST's statement timeout even when each term-specific read
+    // is small enough. Reading each canonical/legacy term separately keeps
+    // the compatibility layer read-only and allows both aliases to coexist.
+    for (const termValue of terms) {
+      for (let offset = 0; ; offset += pageSize) {
+        let query = client.from(tableName(name)).select('*');
+        if (termValue) query = query.eq('term_id', termValue);
+        const { data, error } = await query.range(offset, offset + pageSize - 1);
+        if (error) return { data: null, error };
+        const page = data || [];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
     }
     return { data: rows, error: null };
   }
@@ -268,8 +274,14 @@ window.supabaseConfig = {
       if (!this.path) {
         for (const [path, value] of Object.entries(values || {})) {
           const parts = pathParts(path);
-          if (parts.length >= 2) await new Ref(`${parts[0]}/${parts[1]}`).set(value);
+          if (parts.length >= 2) await new Ref(parts[0]).write(value, parts[1], false);
         }
+        // A root update may contain hundreds of score rows. Refresh the
+        // read cache and notify listeners once, after every write completes,
+        // instead of reloading the entire dataset after each row.
+        rootPromise = null;
+        await loadRoot(true);
+        listeners.slice().forEach(x => x.ref.once().then(s => x.handler(s)).catch(() => {}));
         return;
       }
       if (pathParts(this.path).length >= 2) {
@@ -279,7 +291,7 @@ window.supabaseConfig = {
       }
       for (const [key,value] of Object.entries(values||{})) await this.write(value, key);
     }
-    async write(value, child) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); }
+    async write(value, child, refresh = true) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); if (refresh) { rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); } }
     remove() { return this.set(null); }
   }
   const auth = { currentUser: null, Auth:{Persistence:{LOCAL:'local'}}, setPersistence:()=>Promise.resolve(), onAuthStateChanged(cb){ let active=true; let unsubscribe=()=>{ active=false; }; (async()=>{ try { await callbackReady; } catch (error) { console.error('SUPABASE_CALLBACK_SESSION_FAILED', error); } const {data,error}=await client.auth.getSession(); if (error) console.error('SUPABASE_GET_SESSION_FAILED', error); auth.currentUser=data?.session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (!active) return; setTimeout(()=>{ if (active) cb(auth.currentUser); },0); const {data:sub}=client.auth.onAuthStateChange((_event,session)=>{auth.currentUser=session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (active) cb(auth.currentUser); }); unsubscribe=()=>{ active=false; sub.subscription.unsubscribe(); }; })(); return ()=>unsubscribe(); }, async signInAnonymously(){ throw new Error('Supabase anonymous auth is disabled'); }, async signInWithPopup(){ const {data,error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}}); if(error) throw error; return {user:auth.currentUser,data}; }, async signOut(){ const {error}=await client.auth.signOut(); if(error) throw error; auth.currentUser=null; window.__SUPABASE_SESSION_READY__ = false; } };
@@ -289,39 +301,43 @@ window.supabaseConfig = {
   window.__SUPABASE_CLIENT__=client; window.__SUPABASE_ROOT__=()=>loadRoot();
 })();
 </script>
-<script>/* Firebase compatibility bridge for the static GitHub Pages build. */
+<script>/* Supabase data/auth bridge for the static GitHub Pages build.
+ * The firebase-shaped API below is only a legacy application interface;
+ * supabase-compat.js supplies it and no Firebase SDK or Firebase data source
+ * is initialized in the production build.
+ */
 (function () {
   const app = firebase.initializeApp(window.firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.database();
-  // Keep Google Auth across reloads so Admin Rules see the same identity
+  // Keep Google Auth across reloads so Supabase RLS sees the same identity
   // that the UI session represents.
   const persistenceReady = Promise.race([
     auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
-      console.warn('Firebase Auth persistence unavailable', error && error.code ? error.code : error);
+      console.warn('Supabase Auth persistence unavailable', error && error.code ? error.code : error);
     }),
     new Promise((resolve) => setTimeout(resolve, 2500))
   ]);
   let snapshotPromise;
   let authReadyPromise;
   let termsPromise;
-  // Do not let a stalled Firebase connection block the application forever.
+  // Do not let a stalled Supabase connection block the application forever.
   // These are client-side circuit breakers only; they never delete or alter
   // records. A failed read is surfaced to the UI so the teacher can retry.
   const READ_CALL_TIMEOUT_MS = 15000;
   const READ_CALL_RETRIES = 1;
   // Google Auth persistence can be slow on a cold browser/profile. Do not
-  // fall through to anonymous Firebase before the saved teacher session has
+  // fall through to anonymous access before the saved teacher session has
   // had a real chance to restore.
   const AUTH_RESTORE_TIMEOUT_MS = 20000;
   const AUTH_SIGN_IN_TIMEOUT_MS = 12000;
   const SCORE_REALTIME_BOOT_TIMEOUT_MS = 18000;
   // Writes must fail back to the durable local queue instead of leaving the
-  // UI in a permanent "saving" state when Firebase never completes a request.
+  // UI in a permanent "saving" state when Supabase never completes a request.
   const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
 
   function readTerms() {
-    // All realtime and one-shot reads must wait for Firebase Auth restoration.
+    // All realtime and one-shot reads must wait for Supabase Auth restoration.
     // Starting a listener before auth is ready produces a denied/empty first
     // snapshot and leaves the UI waiting even though the account is valid.
     if (!termsPromise) termsPromise = ready().then(() => db.ref('/terms').once('value')).catch((error) => {
@@ -333,7 +349,7 @@ window.supabaseConfig = {
   }
 
   function ready() {
-    // Firebase can briefly expose currentUser=null while LOCAL persistence is
+    // Supabase can briefly expose currentUser=null while LOCAL persistence is
     // still restoring Google Auth. Waiting for persistence prevents admin calls
     // from falling through to Anonymous and receiving an empty/denied snapshot.
     return persistenceReady.then(() => {
@@ -344,7 +360,7 @@ window.supabaseConfig = {
           if (unsubscribe) unsubscribe();
           resolve(user || null);
         };
-        // Firebase emits an initial null while LOCAL persistence is being
+        // Supabase emits an initial null while LOCAL persistence is being
         // restored. Do not treat that transient event as a real logout.
         const timeout = setTimeout(() => finish(auth.currentUser || null), AUTH_RESTORE_TIMEOUT_MS);
         unsubscribe = auth.onAuthStateChanged((user) => {
@@ -362,11 +378,22 @@ window.supabaseConfig = {
         let timer;
         const timeout = new Promise((_, reject) => {
           timer = setTimeout(() => {
-            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Firebase');
+            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Supabase');
             error.code = 'client/auth-timeout';
             reject(error);
           }, AUTH_SIGN_IN_TIMEOUT_MS);
         });
+        if (window.__SUPABASE_MODE__) {
+          return Promise.race([
+            window.__SUPABASE_CLIENT__?.auth?.getSession().then((result) => {
+              const user = result?.data?.session?.user || null;
+              if (!user) throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
+              auth.currentUser = user;
+              return user;
+            }),
+            timeout
+          ]).finally(() => clearTimeout(timer));
+        }
         return Promise.race([auth.signInAnonymously().then((result) => result.user), timeout]).finally(() => clearTimeout(timer));
       });
     });
@@ -438,9 +465,15 @@ window.supabaseConfig = {
     if (!root || !raw) return raw;
     return normalizedTerm(raw, root);
   }
+  // Firebase contains both the display label (`1/2569`) and the historical
+  // Terms.TermID timestamp. Treat every record as belonging to the same
+  // canonical term at the read boundary; never rewrite the source rows here.
+  function recordTerm(row) {
+    return row && (row.Term || row.TermID || row.term || row.termId);
+  }
   function subject(row, root) { return { code: text(row.SubjectCode), name: text(row.SubjectName), term: normalizedTerm(row.Term, root), status: text(row.Status), teacher: text(row.Teacher), classes: text(row.Classes) }; }
-  function assignment(row, root) { return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
-  function attendance(row, root) { return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
+  function assignment(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
+  function attendance(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
   function score(row) {
     return {
       id: text(row.ScoreID),
@@ -567,10 +600,14 @@ window.supabaseConfig = {
     return Promise.race([call(name, args), deadline]).finally(() => clearTimeout(timer));
   }
   async function readTermScoped(pathName, selectedTerm, termRoot) {
-    const queryValue = termQueryValue(termRoot || { terms: {} }, selectedTerm, pathName);
-    const scoped = await db.ref(`/${pathName}`).orderByChild('Term').equalTo(queryValue).once('value');
-    const scopedValue = scoped.val() || {};
-    // Keep compatibility with legacy rows that do not have Term yet.
+    const root = termRoot || { terms: {} };
+    const queryValues = termQueryValues(root, selectedTerm, pathName);
+    const snapshots = await Promise.all(queryValues.map((value) =>
+      db.ref(`/${pathName}`).orderByChild('Term').equalTo(value).once('value')
+    ));
+    const scopedValue = {};
+    snapshots.forEach((snapshot) => Object.assign(scopedValue, snapshot.val() || {}));
+    // Keep compatibility with legacy rows that have no indexed Term field.
     return Object.keys(scopedValue).length ? scopedValue : ((await db.ref(`/${pathName}`).once('value')).val() || {});
   }
   // Score entry only needs these nodes. Keeping attendance, audit, users and
@@ -663,7 +700,7 @@ window.supabaseConfig = {
       readTermScoped('students', selected, { terms }),
       readTermScoped('assignments', selected, { terms }),
       db.ref('/teacherClasses').once('value').then((snapshot) => snapshot.val() || {}),
-      db.ref('/attendance').orderByChild('Term').equalTo(termQueryValue({ terms }, selected, 'attendance')).once('value').then((snapshot) => snapshot.val() || {})
+      Promise.all(termQueryValues({ terms }, selected, 'attendance').map((value) => db.ref('/attendance').orderByChild('Term').equalTo(value).once('value'))).then((snapshots) => Object.assign({}, ...snapshots.map((snapshot) => snapshot.val() || {})))
     ]);
     return { students, assignments, terms, teacherClasses, attendance };
   }
@@ -1000,46 +1037,63 @@ window.supabaseConfig = {
     const allowedClasses = scopedTeacherClasses.map((r) => ({ subject: text(r.SubjectCode || r.subjectCode), level: text(r.Level || r.level), room: text(r.Room || r.room) })).filter((r) => r.subject && r.level && r.room);
     const isAllowedStudent = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room));
     const isAllowedAssignment = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room) && x.subject === text(r.SubjectCode || r.subjectCode));
-    const students = values('students', root).filter((r) => termMatches(r.Term) && isAllowedStudent(r)).map((r) => ({ ...student(r), term: selectedTerm }));
-    const subjects = values('subjects', root).filter((r) => termMatches(r.Term, root) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
-    const assignments = values('assignments', root).filter((r) => termMatches(r.Term) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r), term: selectedTerm }));
-    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(r.Term)).length;
+    const students = values('students', root).filter((r) => termMatches(recordTerm(r)) && isAllowedStudent(r)).map((r) => ({ ...student(r, root), term: selectedTerm }));
+    const subjects = values('subjects', root).filter((r) => termMatches(recordTerm(r)) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
+    const assignments = values('assignments', root).filter((r) => termMatches(recordTerm(r)) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r, root), term: selectedTerm }));
+    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(recordTerm(r))).length;
     const users = String(currentUser && currentUser.role).toLowerCase() === 'admin' ? values('users', root).map(user) : [];
     const combos = [...new Map(allowedClasses.map((x) => [`${x.subject}|${x.level}|${x.room}`, { subject: x.subject, level: x.level, room: x.room }])).values()];
     return { success: true, data: { meta: { term: selectedTerm, requestedTerm: selectedTerm, generatedAt: Date.now(), termAssignmentCount, counts: { students: students.length, subjects: subjects.length, assignments: assignments.length } }, students, subjects, assignments, users, combos, levels: [...new Set(students.map((r) => r.level).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), rooms: [...new Set(students.map((r) => r.room).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), attendance: values('attendance', root).map((r) => attendance(r, root)), scores: values('scores', root).map(score), teacherClasses: scopedTeacherClasses.map((r) => teacherClass(r, root)), terms: values('terms', root), settings: { ...rawMap(root.settings), ...rawMap(root.systemSettings) } } };
   }
   function resultError(message) { return { success: false, message }; }
   async function adminOnly() {
-    await ready();
-    if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
+    const identityUser = await verifiedIdentityUser();
+    if (String(identityUser && identityUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
-  async function staffProfileFromAuth(firebaseUser) {
-    const email = text(firebaseUser && firebaseUser.email).toLowerCase();
-    if (!email) return null;
+  async function verifiedIdentityUser() {
+    let identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__?.auth?.getSession) {
+      const result = await window.__SUPABASE_CLIENT__.auth.getSession();
+      identityUser = result?.data?.session?.user || identityUser;
+      if (identityUser) {
+        auth.currentUser = identityUser;
+        window.__FIREBASE_AUTH_USER = identityUser;
+      }
+    }
+    if (!identityUser) {
+      await ready();
+      identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    }
+    if (!identityUser || identityUser.isAnonymous || (!identityUser.id && !identityUser.uid) || !text(identityUser.email)) {
+      throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
+    }
+    return identityUser;
+  }
+  async function staffProfileForIdentity(identityUser) {
+    const email = text(identityUser && identityUser.email).toLowerCase();
     if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
       const { data: row, error } = await window.__SUPABASE_CLIENT__.from('app_users').select('*').eq('email', email).maybeSingle();
       if (error) throw error;
       const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
       return { ...legacy, ...(row || {}) };
     }
-    const indexedRoot = (await db.ref('authProfiles').once('value')).val() || {};
-    return Object.values(rawMap(indexedRoot)).find((row) => text(row.Email || row.email).toLowerCase() === email) || null;
+    const usersRoot = (await db.ref('/users').once('value')).val() || {};
+    return Object.values(usersRoot).find((row) =>
+      text(row.Email || row.email).toLowerCase() === email ||
+      text(row.AuthUID || row.auth_uid || row.uid).toLowerCase() === text(identityUser.id || identityUser.uid).toLowerCase()
+    ) || {};
   }
   async function teacherOrAdmin(payload) {
-    await ready();
-    const firebaseUser = auth.currentUser;
-    const firebaseEmail = String(firebaseUser && firebaseUser.email || '').toLowerCase();
-    if (firebaseEmail === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin' };
-    if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
-      throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
-    }
-    const profile = await staffProfileFromAuth(firebaseUser) || (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
+    const identityUser = await verifiedIdentityUser();
+    const email = String(identityUser && identityUser.email || '').trim().toLowerCase();
+    if (email === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin', email };
+    // Supabase app_users is the single source of staff identity. Do not use
+    // the retired Firebase authProfiles/authEmailIndex nodes for authorization.
+    const profile = await staffProfileForIdentity(identityUser);
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
-    const teacherId = text(profile.UserID || profile.userId || profile.user_id || profile.id || profile.legacy_user_id);
-    if (!teacherId) throw new Error('บัญชีครูยังไม่มีรหัสผู้ใช้ที่ผูกกับสิทธิ์การสอน');
-    return { admin: false, teacherId, firebaseUid: firebaseUser.uid };
+    return { admin: false, teacherId: text(profile.UserID || profile.user_id || profile.id), supabaseUserId: identityUser.id || identityUser.uid, email };
   }
   async function teacherAssignmentOrAdmin(payload) {
     const authz = await teacherOrAdmin(payload);
@@ -1152,15 +1206,14 @@ window.supabaseConfig = {
     // This is on the login critical path and only needs the authenticated
     // teacher/admin identity record.
     if (name === 'getCurrentUserProfile') {
-      await ready();
+      const identityUser = await verifiedIdentityUser();
       const id = text(args[0]);
-      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
+      const email = String(identityUser?.email || '').trim().toLowerCase();
       let record = null;
       if (window.__SUPABASE_MODE__) {
-        const root = await data();
-        const users = values('users', root);
-        record = users.find((row) => text(row.UserID || row.userId || row.user_id) === id || text(row.Email || row.email).toLowerCase() === email) || null;
-        if (email === 'suradet.t@wrk.ac.th' && id === 'admin') record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        record = await staffProfileForIdentity(identityUser);
+        if (email === 'suradet.t@wrk.ac.th' && (id === 'admin' || !record || !Object.keys(record).length)) record = { UserID: 'admin', Username: email, Email: email, Name: identityUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        if (record && id && text(record.UserID || record.userId || record.user_id || record.id) !== id && email !== 'suradet.t@wrk.ac.th') record = null;
         return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
       }
       if (email === 'suradet.t@wrk.ac.th') {
@@ -1411,10 +1464,10 @@ window.supabaseConfig = {
       const teacherScope = values('teacherClasses', root).filter((r) => matchesTerm(r.TermID || r.Term || r.term, selected, root) && text(r.TeacherID || r.teacherId) === text(arg.user && arg.user.id) && text(r.Status || r.status).toLowerCase() !== 'inactive');
       const allowedStudent = (r) => role === 'admin' || teacherScope.some((x) => text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
       const allowedAssignment = (r) => role === 'admin' || teacherScope.some((x) => text(x.SubjectCode || x.subjectCode) === text(r.SubjectCode) && text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedStudent(r));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedStudent(r));
       const studentIds = new Set(students.map((r) => text(r.StudentID)));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedAssignment(r));
-      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(r.Term, selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedAssignment(r));
+      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
       const date = text(arg.date);
       const dayRows = date ? attendanceRows.filter((r) => text(r.Date).slice(0, 10) === date) : attendanceRows;
       const status = (value) => text(value).toLowerCase();
@@ -1436,11 +1489,11 @@ window.supabaseConfig = {
     }
     if (name === 'loadScoresGrid') {
       const selected = activeTerm(root, arg.term);
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
       const assignmentIds = new Set(assignments.map((a) => a.id)); const studentIds = new Set(students.map((s) => s.id)); const scores = {};
       const orphanScores = [];
-      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
+      values('scores', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
         const assignmentId = text(r.AssignmentID || r.assignmentId);
         if (assignmentIds.has(assignmentId)) scores[`${assignmentId}_${text(r.StudentID)}`] = score(r);
         else orphanScores.push({ scoreId: text(r.ScoreID || r.scoreId), assignmentId, studentId: text(r.StudentID || r.studentId), subjectCode: text(r.SubjectCode || r.subjectCode), term: text(r.TermID || r.Term || r.term), score: r.Score ?? r.score ?? '', isSubmitted: r.IsSubmitted ?? r.isSubmitted ?? '' });
@@ -1924,6 +1977,12 @@ window.supabaseConfig = {
       if (!current && !hasOAuthCallback) return redirectToGoogle();
       return redirectToGoogle();
     }
+    // Make the verified Supabase identity available to the legacy application
+    // write queue immediately. Waiting only for the auth-state callback can
+    // leave the first save queued as "not connected" even though the user is
+    // already signed in.
+    window.__FIREBASE_AUTH_USER = authUser;
+    if (window.firebase && window.firebase.auth) window.firebase.auth().currentUser = authUser;
 
     const email = String(authUser.email || '').trim().toLowerCase();
     const { data: match, error: profileError } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
@@ -3165,12 +3224,12 @@ var DATA_CONTROLLER = new DataController();
             </div>
         </div>
 
-        <!-- TAB: GRADING SYSTEM (NATIVE FIREBASE) -->
+        <!-- TAB: GRADING SYSTEM (NATIVE SUPABASE) -->
         <div id="tab-grading" class="content-tab hidden p-4 md:p-8 space-y-5 fade-in">
             <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                     <h2 class="text-2xl font-extrabold text-slate-800"><i class="fa-solid fa-graduation-cap text-indigo-600 mr-2"></i>ตัดเกรด ป.พ.</h2>
-                    <p class="text-sm text-slate-500">ทำงานบนฐานข้อมูล Firebase เดียวกับนักเรียน งาน และคะแนนของระบบหลัก</p>
+                    <p class="text-sm text-slate-500">ทำงานบนฐานข้อมูล Supabase เดียวกับนักเรียน งาน และคะแนนของระบบหลัก</p>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
@@ -3382,7 +3441,7 @@ var DATA_CONTROLLER = new DataController();
 
             <section id="settings-panel-grading" class="settings-panel hidden bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
                 <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-graduation-cap text-school-primary"></i> Grading System Integration</h3>
-                <p class="text-sm text-green-700 bg-green-50 border border-green-100 rounded-xl p-4"><i class="fa-solid fa-circle-check mr-2"></i>ระบบตัดเกรดถูกฝังอยู่ในแท็บ “ตัดเกรด ป.พ.” ของระบบหลักแล้ว ใช้ Firebase ชุดเดียวกัน ไม่ต้องตั้งค่า URL หรือเปิดระบบแยก</p>
+                <p class="text-sm text-green-700 bg-green-50 border border-green-100 rounded-xl p-4"><i class="fa-solid fa-circle-check mr-2"></i>ระบบตัดเกรดถูกฝังอยู่ในแท็บ “ตัดเกรด ป.พ.” ของระบบหลักแล้ว ใช้ Supabase ชุดเดียวกัน ไม่ต้องตั้งค่า URL หรือเปิดระบบแยก</p>
             </section>
         </div>
     </main>
@@ -3843,7 +3902,7 @@ var DATA_CONTROLLER = new DataController();
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
             // Use the verified account email as the stable queue namespace.
-            // Firebase UID may be unavailable briefly during Auth restoration.
+            // Supabase Auth UID may be unavailable briefly during restoration.
             const identity = (authUser && authUser.email) || (localUser && (localUser.email || localUser.Email)) || (persistedUser && (persistedUser.email || persistedUser.Email)) || (authUser && authUser.uid) || (localUser && localUser.id) || 'anonymous';
             const safe = String(identity).trim().replace(/[^A-Za-z0-9_-]/g, '_');
             return 'sync_queue_' + (safe || 'anonymous');
@@ -3886,7 +3945,7 @@ var DATA_CONTROLLER = new DataController();
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             if (role !== 'teacher') return true;
             // Teachers may update only the status of students in their
-            // assigned rooms. The Firebase write path enforces that scope;
+            // assigned rooms. The Supabase write path enforces that scope;
             // do not leave valid STUDENT status tasks permanently blocked in
             // the client queue.
             return !['DELETE_STUDENT', 'USER', 'DELETE_USER', 'SUBJECT', 'DELETE_SUBJECT'].includes(String(task && task.type || '').toUpperCase());
@@ -3897,12 +3956,15 @@ var DATA_CONTROLLER = new DataController();
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null)
+                || window.__FIREBASE_AUTH_USER
+                || window.__SUPABASE_CLIENT__?.auth?.currentUser;
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
-            if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
+            if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail) return false;
             const role = String(CURRENT_USER.role || '').toLowerCase();
-            return role !== 'admin' || authEmail === 'suradet.t@wrk.ac.th';
+            if (role === 'admin') return authEmail === 'suradet.t@wrk.ac.th';
+            return !currentEmail || currentEmail === authEmail;
         }
 
         attendanceKey(payload) {
@@ -4047,7 +4109,7 @@ var DATA_CONTROLLER = new DataController();
             const waitingForAuth = this.queue.some(task => this.requiresVerifiedAuth(task)) && !this.hasVerifiedWriteIdentity();
             if (waitingForAuth) {
                 this.updateUI('auth-wait');
-                console.warn('SYNC_ENGINE: waiting for verified Firebase Auth before sending queued data');
+                console.warn('SYNC_ENGINE: waiting for verified Supabase Auth before sending queued data');
                 return;
             }
 
@@ -4060,7 +4122,7 @@ var DATA_CONTROLLER = new DataController();
 
             // Recover score and student-status tasks created by an older build
             // that marked them blocked after a few failures. Both writes are
-            // now protected by their current Firebase authorization path.
+            // now protected by their current Supabase authorization path.
             let recoveredRetryableTask = false;
             this.queue.forEach(task => {
                 const previousError = String(task.lastError || '').toLowerCase();
@@ -4347,7 +4409,7 @@ var DATA_CONTROLLER = new DataController();
     window.clearPendingSyncQueue = async () => {
         const queue = SYNC_ENGINE && Array.isArray(SYNC_ENGINE.queue) ? SYNC_ENGINE.queue : [];
         if (!queue.length) return;
-        const result = await Swal.fire({ icon: 'warning', title: 'ล้างคิวซิงก์ค้าง?', text: `จะลบเฉพาะคิวในเครื่องนี้ ${queue.length} รายการ ข้อมูลบน Firebase จะไม่ถูกลบ`, showCancelButton: true, confirmButtonText: 'ยืนยันล้างคิว', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc2626' });
+        const result = await Swal.fire({ icon: 'warning', title: 'ล้างคิวซิงก์ค้าง?', text: `จะลบเฉพาะคิวในเครื่องนี้ ${queue.length} รายการ ข้อมูลบน Supabase จะไม่ถูกลบ`, showCancelButton: true, confirmButtonText: 'ยืนยันล้างคิว', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc2626' });
         if (!result.isConfirmed) return;
         SYNC_ENGINE.pause();
         const key = SYNC_ENGINE.storageKey;
@@ -4356,7 +4418,7 @@ var DATA_CONTROLLER = new DataController();
         SYNC_ENGINE.activeTaskId = null;
         SYNC_ENGINE.isSyncing = false;
         SYNC_ENGINE.updateUI('synced');
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'ล้างคิวซิงก์แล้ว', text: 'ข้อมูลบน Firebase ไม่ถูกลบ', showConfirmButton: false, timer: 1800 });
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'ล้างคิวซิงก์แล้ว', text: 'ข้อมูลบน Supabase ไม่ถูกลบ', showConfirmButton: false, timer: 1800 });
     };
 
     function getStudentFirstName(student) {
@@ -4665,6 +4727,7 @@ var DATA_CONTROLLER = new DataController();
             const rows = result && result.success ? (result.data || []) : [];
             const subjects = rows.map(normalizeSubjectRecord).filter(s => s.code);
             if (!subjects.length) return;
+            const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             window.SUBJECTS_CACHE = subjects;
             window.__SHARED_SUBJECTS = subjects;
             populateSelects({ subjects });
@@ -8586,7 +8649,7 @@ var DATA_CONTROLLER = new DataController();
     window.CURRENT_SETTINGS_TAB = window.CURRENT_SETTINGS_TAB || 'users';
 
     function getAdminSettingsBootstrapCacheKey(term) {
-        // Version the cache so a previous empty/partial bootstrap cannot hide newly restored Firebase data.
+            // Version the cache so a previous empty/partial bootstrap cannot hide newly restored Supabase data.
         return `ADMIN_SETTINGS_BOOTSTRAP_V3_${normalizeTermForUI(term || window.CURRENT_SERVER_TERM)}_${getCurrentUserIdForCache()}`;
     }
 
@@ -8941,7 +9004,7 @@ var DATA_CONTROLLER = new DataController();
             activeBtn.classList.remove('text-slate-600', 'hover:bg-slate-50');
         }
         if (tab === 'users') {
-            // Always refresh the admin user table from Firebase. This avoids a
+            // Always refresh the admin user table from Supabase. This avoids a
             // stale/empty bootstrap cache hiding teachers from the assignment form.
             loadAdminSettingsBootstrap(false, () => { filterUsers(); loadUsers(); });
         } else if (tab === 'terms') {
@@ -9881,6 +9944,7 @@ var DATA_CONTROLLER = new DataController();
         if (termSelect) delete termSelect.dataset.syncTerm;
         const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : {};
         const role = String(CURRENT_USER?.role || '').toLowerCase();
+        const isAdmin = role === 'admin' || String(CURRENT_USER?.email || CURRENT_USER?.Email || '').trim().toLowerCase() === 'suradet.t@wrk.ac.th';
         const teacherId = String(CURRENT_USER?.id || '');
         // Prefer a populated bootstrap scope, but do not let an empty/stale
         // bootstrap array hide the realtime class permissions.
@@ -9916,7 +9980,7 @@ var DATA_CONTROLLER = new DataController();
         };
         const termClasses = allClasses.filter(termMatchesClass);
         const usableClasses = termClasses.length ? termClasses : allClasses;
-        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
+        const scopedClasses = (isAdmin ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
         const classSubject = c => classValue(c, ['subjectCode', 'SubjectCode', 'subject', 'subject_code']);
         const classLevel = c => classValue(c, ['level', 'Level', 'classLevel', 'class_level']);
         const classRoom = c => classValue(c, ['room', 'Room', 'classRoom', 'class_room']);
@@ -9946,7 +10010,7 @@ var DATA_CONTROLLER = new DataController();
             }
         }
         if (!normalizedSubjects.length) normalizedSubjects = getSubjectCatalogFallback();
-        const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
+        const subjects = normalizedSubjects.filter(s => isAdmin || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
@@ -9960,10 +10024,13 @@ var DATA_CONTROLLER = new DataController();
             const room = String(s.room || s.Room || '').trim();
             return [`${level}|${room}`, { level, room }];
         }).filter(([, value]) => value.level && value.room))].map(([, value]) => value);
-        // Admins can inspect every class represented by the shared student
-        // database. Teachers remain restricted to their configured classes.
-        const subjectClasses = role === 'admin'
-            ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
+        // Admins can inspect every class configured for the selected subject.
+        // Do not derive this from the student list: that loses the subject ↔
+        // class permission mapping and makes every subject look identical.
+        // Teachers remain restricted to their own configured classes.
+        const adminSubjectClasses = usableClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
+        const subjectClasses = isAdmin
+            ? (adminSubjectClasses.length ? adminSubjectClasses : (adminStudentClasses.length ? adminStudentClasses : usableClasses))
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
         // On a cold production session the shared student snapshot can arrive
@@ -9972,13 +10039,16 @@ var DATA_CONTROLLER = new DataController();
         // blank while the realtime snapshot catches up.
         const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
         const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
-        const levelValues = [...new Set((subjectClasses.map(classLevel).filter(Boolean).length ? subjectClasses.map(classLevel).filter(Boolean) : scopedLevelOptions))].sort(naturalSort);
+        const levelOptions = subjectClasses.map(classLevel).filter(Boolean);
+        // Once a subject is selected, dependent filters must come only from
+        // that subject's configured classes. Never reuse the previous
+        // subject's level/room as a fallback; that can send CRUD writes to
+        // the wrong classroom.
+        const levelValues = [...new Set(levelOptions.length ? levelOptions : (activeSubject ? [] : scopedLevelOptions))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const scopedRoomsForLevel = scopedRoomOptions;
-        const roomValues = [...new Set((subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean).length
-            ? subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean)
-            : scopedRoomsForLevel))].sort(naturalSort);
+        const roomOptions = subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean);
+        const roomValues = [...new Set(roomOptions.length ? roomOptions : (activeSubject ? [] : scopedRoomOptions))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
@@ -10021,7 +10091,7 @@ var DATA_CONTROLLER = new DataController();
             if (requestSeq !== grading.loadSeq || !payload) return;
             if (gradingHasPendingEdits()) {
                 grading.realtimePending = payload;
-                return gradingSetStatus('มีข้อมูลตัดเกรดใหม่จาก Firebase แต่จะไม่ทับข้อมูลที่กำลังกรอก', 'info');
+                return gradingSetStatus('มีข้อมูลตัดเกรดใหม่จาก Supabase แต่จะไม่ทับข้อมูลที่กำลังกรอก', 'info');
             }
             grading.data = payload; LocalStore.set(cacheKey, payload); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(payload.exams || {})); grading.history = [nativeSnapshot()]; grading.future = [];
             const s = payload.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value;
@@ -10040,7 +10110,7 @@ var DATA_CONTROLLER = new DataController();
             if (typeof grading.realtimeUnsubscribe === 'function') grading.realtimeUnsubscribe();
             grading.realtimeKey = cacheKey;
             grading.realtimePending = null;
-            gradingSetStatus('กำลังโหลดข้อมูลตัดเกรดจาก Firebase แบบเรียลไทม์...', 'info');
+            gradingSetStatus('กำลังโหลดข้อมูลตัดเกรดจาก Supabase แบบเรียลไทม์...', 'info');
             grading.realtimeUnsubscribe = window.firebaseSubscribeGradingData(filter, response => {
                 if (!response || !response.success || !response.data || requestSeq !== grading.loadSeq) return;
                 applyData(response.data, 'อัปเดตล่าสุด');
@@ -10050,9 +10120,9 @@ var DATA_CONTROLLER = new DataController();
                 grading.realtimeUnsubscribe = null;
                 if (!grading.realtimeFallbackUsed) {
                     grading.realtimeFallbackUsed = true;
-                    gradingSetStatus('เรียลไทม์ตอบช้า กำลังโหลดข้อมูลสำรองจาก Firebase...', 'info');
+                    gradingSetStatus('เรียลไทม์ตอบช้า กำลังโหลดข้อมูลสำรองจาก Supabase...', 'info');
                     loadNativeGradingData(true);
-                } else if (!grading.data) gradingSetStatus('โหลดข้อมูลตัดเกรดจาก Firebase ไม่สำเร็จ', 'error');
+                } else if (!grading.data) gradingSetStatus('โหลดข้อมูลตัดเกรดจาก Supabase ไม่สำเร็จ', 'error');
             });
             return;
         }
@@ -10060,7 +10130,7 @@ var DATA_CONTROLLER = new DataController();
         if (cached && Array.isArray(cached.students) && cached.students.length) {
             grading.data = cached; grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(cached.exams || {})); grading.history = [nativeSnapshot()]; grading.future = []; renderNativeGradingTable(cached); gradingSetStatus(`แสดงข้อมูลจากเครื่อง ${cached.students.length} คน | กำลังตรวจสอบข้อมูลล่าสุด...`, 'info');
         }
-        gradingSetStatus('กำลังโหลดข้อมูลจาก Firebase...', 'info');
+        gradingSetStatus('กำลังโหลดข้อมูลจาก Supabase...', 'info');
         google.script.run.withSuccessHandler(res => { if (requestSeq !== grading.loadSeq) return; if (!res || !res.success) return gradingSetStatus(res?.message || 'โหลดข้อมูลไม่สำเร็จ', 'error'); if ((grading.revision || 0) !== revisionAtRequest && (Object.keys(grading.dirty || {}).length || grading.settingsDirty)) return gradingSetStatus('มีการแก้ไขใหม่ระหว่างโหลด จึงไม่ทับข้อมูลที่กำลังกรอก', 'info'); grading.data = res.data; LocalStore.set(cacheKey, res.data); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(res.data.exams || {})); grading.history = [nativeSnapshot()]; grading.future = []; const s = res.data.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value; renderNativeGradingTable(res.data); gradingSetStatus(`โหลดแล้ว ${res.data.students.length} คน | งาน ${res.data.assignments.length} รายการ`, 'success'); }).withFailureHandler(err => { if (requestSeq === grading.loadSeq) gradingSetStatus(String(err), 'error'); }).getGradingData(filter);
     }
     function saveNativeGradingData(auto = false) {

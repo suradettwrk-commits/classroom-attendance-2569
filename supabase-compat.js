@@ -85,7 +85,7 @@
   }
   async function readAllRows(name, termCandidates) {
     const rows = [];
-    const pageSize = 1000;
+    const pageSize = 500;
     // These tables grow with every lesson and score entry. Reading the whole
     // history on every page load causes PostgREST statement timeouts. The
     // compatibility layer is always consumed for one active term at a time,
@@ -93,16 +93,22 @@
     // that term. This is read-only and does not alter stored data.
     const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
     const term = termScoped ? activeTermHint() : '';
-    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [];
-    for (let offset = 0; ; offset += pageSize) {
-      let query = client.from(tableName(name)).select('*');
-      if (terms.length > 1) query = query.in('term_id', terms);
-      else if (terms.length === 1) query = query.eq('term_id', terms[0]);
-      const { data, error } = await query.range(offset, offset + pageSize - 1);
-      if (error) return { data: null, error };
-      const page = data || [];
-      rows.push(...page);
-      if (page.length < pageSize) break;
+    const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [''];
+    if (termScoped && !terms.length) return { data: [], error: null };
+    // Avoid one large IN(...) statement. On the live dataset that query can
+    // exceed PostgREST's statement timeout even when each term-specific read
+    // is small enough. Reading each canonical/legacy term separately keeps
+    // the compatibility layer read-only and allows both aliases to coexist.
+    for (const termValue of terms) {
+      for (let offset = 0; ; offset += pageSize) {
+        let query = client.from(tableName(name)).select('*');
+        if (termValue) query = query.eq('term_id', termValue);
+        const { data, error } = await query.range(offset, offset + pageSize - 1);
+        if (error) return { data: null, error };
+        const page = data || [];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
     }
     return { data: rows, error: null };
   }
@@ -213,8 +219,14 @@
       if (!this.path) {
         for (const [path, value] of Object.entries(values || {})) {
           const parts = pathParts(path);
-          if (parts.length >= 2) await new Ref(`${parts[0]}/${parts[1]}`).set(value);
+          if (parts.length >= 2) await new Ref(parts[0]).write(value, parts[1], false);
         }
+        // A root update may contain hundreds of score rows. Refresh the
+        // read cache and notify listeners once, after every write completes,
+        // instead of reloading the entire dataset after each row.
+        rootPromise = null;
+        await loadRoot(true);
+        listeners.slice().forEach(x => x.ref.once().then(s => x.handler(s)).catch(() => {}));
         return;
       }
       if (pathParts(this.path).length >= 2) {
@@ -224,7 +236,7 @@
       }
       for (const [key,value] of Object.entries(values||{})) await this.write(value, key);
     }
-    async write(value, child) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); }
+    async write(value, child, refresh = true) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); if (refresh) { rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); } }
     remove() { return this.set(null); }
   }
   const auth = { currentUser: null, Auth:{Persistence:{LOCAL:'local'}}, setPersistence:()=>Promise.resolve(), onAuthStateChanged(cb){ let active=true; let unsubscribe=()=>{ active=false; }; (async()=>{ try { await callbackReady; } catch (error) { console.error('SUPABASE_CALLBACK_SESSION_FAILED', error); } const {data,error}=await client.auth.getSession(); if (error) console.error('SUPABASE_GET_SESSION_FAILED', error); auth.currentUser=data?.session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (!active) return; setTimeout(()=>{ if (active) cb(auth.currentUser); },0); const {data:sub}=client.auth.onAuthStateChange((_event,session)=>{auth.currentUser=session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (active) cb(auth.currentUser); }); unsubscribe=()=>{ active=false; sub.subscription.unsubscribe(); }; })(); return ()=>unsubscribe(); }, async signInAnonymously(){ throw new Error('Supabase anonymous auth is disabled'); }, async signInWithPopup(){ const {data,error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}}); if(error) throw error; return {user:auth.currentUser,data}; }, async signOut(){ const {error}=await client.auth.signOut(); if(error) throw error; auth.currentUser=null; window.__SUPABASE_SESSION_READY__ = false; } };

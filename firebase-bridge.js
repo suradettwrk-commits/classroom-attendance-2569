@@ -1,36 +1,40 @@
-/* Firebase compatibility bridge for the static GitHub Pages build. */
+/* Supabase data/auth bridge for the static GitHub Pages build.
+ * The firebase-shaped API below is only a legacy application interface;
+ * supabase-compat.js supplies it and no Firebase SDK or Firebase data source
+ * is initialized in the production build.
+ */
 (function () {
   const app = firebase.initializeApp(window.firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.database();
-  // Keep Google Auth across reloads so Admin Rules see the same identity
+  // Keep Google Auth across reloads so Supabase RLS sees the same identity
   // that the UI session represents.
   const persistenceReady = Promise.race([
     auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
-      console.warn('Firebase Auth persistence unavailable', error && error.code ? error.code : error);
+      console.warn('Supabase Auth persistence unavailable', error && error.code ? error.code : error);
     }),
     new Promise((resolve) => setTimeout(resolve, 2500))
   ]);
   let snapshotPromise;
   let authReadyPromise;
   let termsPromise;
-  // Do not let a stalled Firebase connection block the application forever.
+  // Do not let a stalled Supabase connection block the application forever.
   // These are client-side circuit breakers only; they never delete or alter
   // records. A failed read is surfaced to the UI so the teacher can retry.
   const READ_CALL_TIMEOUT_MS = 15000;
   const READ_CALL_RETRIES = 1;
   // Google Auth persistence can be slow on a cold browser/profile. Do not
-  // fall through to anonymous Firebase before the saved teacher session has
+  // fall through to anonymous access before the saved teacher session has
   // had a real chance to restore.
   const AUTH_RESTORE_TIMEOUT_MS = 20000;
   const AUTH_SIGN_IN_TIMEOUT_MS = 12000;
   const SCORE_REALTIME_BOOT_TIMEOUT_MS = 18000;
   // Writes must fail back to the durable local queue instead of leaving the
-  // UI in a permanent "saving" state when Firebase never completes a request.
+  // UI in a permanent "saving" state when Supabase never completes a request.
   const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
 
   function readTerms() {
-    // All realtime and one-shot reads must wait for Firebase Auth restoration.
+    // All realtime and one-shot reads must wait for Supabase Auth restoration.
     // Starting a listener before auth is ready produces a denied/empty first
     // snapshot and leaves the UI waiting even though the account is valid.
     if (!termsPromise) termsPromise = ready().then(() => db.ref('/terms').once('value')).catch((error) => {
@@ -42,7 +46,7 @@
   }
 
   function ready() {
-    // Firebase can briefly expose currentUser=null while LOCAL persistence is
+    // Supabase can briefly expose currentUser=null while LOCAL persistence is
     // still restoring Google Auth. Waiting for persistence prevents admin calls
     // from falling through to Anonymous and receiving an empty/denied snapshot.
     return persistenceReady.then(() => {
@@ -53,7 +57,7 @@
           if (unsubscribe) unsubscribe();
           resolve(user || null);
         };
-        // Firebase emits an initial null while LOCAL persistence is being
+        // Supabase emits an initial null while LOCAL persistence is being
         // restored. Do not treat that transient event as a real logout.
         const timeout = setTimeout(() => finish(auth.currentUser || null), AUTH_RESTORE_TIMEOUT_MS);
         unsubscribe = auth.onAuthStateChanged((user) => {
@@ -71,11 +75,22 @@
         let timer;
         const timeout = new Promise((_, reject) => {
           timer = setTimeout(() => {
-            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Firebase');
+            const error = new Error('หมดเวลายืนยันการเชื่อมต่อ Supabase');
             error.code = 'client/auth-timeout';
             reject(error);
           }, AUTH_SIGN_IN_TIMEOUT_MS);
         });
+        if (window.__SUPABASE_MODE__) {
+          return Promise.race([
+            window.__SUPABASE_CLIENT__?.auth?.getSession().then((result) => {
+              const user = result?.data?.session?.user || null;
+              if (!user) throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
+              auth.currentUser = user;
+              return user;
+            }),
+            timeout
+          ]).finally(() => clearTimeout(timer));
+        }
         return Promise.race([auth.signInAnonymously().then((result) => result.user), timeout]).finally(() => clearTimeout(timer));
       });
     });
@@ -147,9 +162,15 @@
     if (!root || !raw) return raw;
     return normalizedTerm(raw, root);
   }
+  // Firebase contains both the display label (`1/2569`) and the historical
+  // Terms.TermID timestamp. Treat every record as belonging to the same
+  // canonical term at the read boundary; never rewrite the source rows here.
+  function recordTerm(row) {
+    return row && (row.Term || row.TermID || row.term || row.termId);
+  }
   function subject(row, root) { return { code: text(row.SubjectCode), name: text(row.SubjectName), term: normalizedTerm(row.Term, root), status: text(row.Status), teacher: text(row.Teacher), classes: text(row.Classes) }; }
-  function assignment(row, root) { return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
-  function attendance(row, root) { return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: text(row.TermID || row.Term), termId: canonicalTermId(row.TermID || row.Term, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
+  function assignment(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
+  function attendance(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
   function score(row) {
     return {
       id: text(row.ScoreID),
@@ -276,10 +297,14 @@
     return Promise.race([call(name, args), deadline]).finally(() => clearTimeout(timer));
   }
   async function readTermScoped(pathName, selectedTerm, termRoot) {
-    const queryValue = termQueryValue(termRoot || { terms: {} }, selectedTerm, pathName);
-    const scoped = await db.ref(`/${pathName}`).orderByChild('Term').equalTo(queryValue).once('value');
-    const scopedValue = scoped.val() || {};
-    // Keep compatibility with legacy rows that do not have Term yet.
+    const root = termRoot || { terms: {} };
+    const queryValues = termQueryValues(root, selectedTerm, pathName);
+    const snapshots = await Promise.all(queryValues.map((value) =>
+      db.ref(`/${pathName}`).orderByChild('Term').equalTo(value).once('value')
+    ));
+    const scopedValue = {};
+    snapshots.forEach((snapshot) => Object.assign(scopedValue, snapshot.val() || {}));
+    // Keep compatibility with legacy rows that have no indexed Term field.
     return Object.keys(scopedValue).length ? scopedValue : ((await db.ref(`/${pathName}`).once('value')).val() || {});
   }
   // Score entry only needs these nodes. Keeping attendance, audit, users and
@@ -372,7 +397,7 @@
       readTermScoped('students', selected, { terms }),
       readTermScoped('assignments', selected, { terms }),
       db.ref('/teacherClasses').once('value').then((snapshot) => snapshot.val() || {}),
-      db.ref('/attendance').orderByChild('Term').equalTo(termQueryValue({ terms }, selected, 'attendance')).once('value').then((snapshot) => snapshot.val() || {})
+      Promise.all(termQueryValues({ terms }, selected, 'attendance').map((value) => db.ref('/attendance').orderByChild('Term').equalTo(value).once('value'))).then((snapshots) => Object.assign({}, ...snapshots.map((snapshot) => snapshot.val() || {})))
     ]);
     return { students, assignments, terms, teacherClasses, attendance };
   }
@@ -709,46 +734,63 @@
     const allowedClasses = scopedTeacherClasses.map((r) => ({ subject: text(r.SubjectCode || r.subjectCode), level: text(r.Level || r.level), room: text(r.Room || r.room) })).filter((r) => r.subject && r.level && r.room);
     const isAllowedStudent = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room));
     const isAllowedAssignment = (r) => role === 'admin' || allowedClasses.some((x) => x.level === text(r.Level || r.level) && x.room === text(r.Room || r.room) && x.subject === text(r.SubjectCode || r.subjectCode));
-    const students = values('students', root).filter((r) => termMatches(r.Term) && isAllowedStudent(r)).map((r) => ({ ...student(r), term: selectedTerm }));
-    const subjects = values('subjects', root).filter((r) => termMatches(r.Term, root) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
-    const assignments = values('assignments', root).filter((r) => termMatches(r.Term) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r), term: selectedTerm }));
-    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(r.Term)).length;
+    const students = values('students', root).filter((r) => termMatches(recordTerm(r)) && isAllowedStudent(r)).map((r) => ({ ...student(r, root), term: selectedTerm }));
+    const subjects = values('subjects', root).filter((r) => termMatches(recordTerm(r)) && (role === 'admin' || allowedClasses.some((x) => x.subject === text(r.SubjectCode)))).map((r) => ({ ...subject(r, root), term: selectedTerm }));
+    const assignments = values('assignments', root).filter((r) => termMatches(recordTerm(r)) && isAllowedAssignment(r)).map((r) => ({ ...assignment(r, root), term: selectedTerm }));
+    const termAssignmentCount = values('assignments', root).filter((r) => termMatches(recordTerm(r))).length;
     const users = String(currentUser && currentUser.role).toLowerCase() === 'admin' ? values('users', root).map(user) : [];
     const combos = [...new Map(allowedClasses.map((x) => [`${x.subject}|${x.level}|${x.room}`, { subject: x.subject, level: x.level, room: x.room }])).values()];
     return { success: true, data: { meta: { term: selectedTerm, requestedTerm: selectedTerm, generatedAt: Date.now(), termAssignmentCount, counts: { students: students.length, subjects: subjects.length, assignments: assignments.length } }, students, subjects, assignments, users, combos, levels: [...new Set(students.map((r) => r.level).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), rooms: [...new Set(students.map((r) => r.room).filter(Boolean))].sort((a,b) => numericPart(a)-numericPart(b) || text(a).localeCompare(text(b), 'th')), attendance: values('attendance', root).map((r) => attendance(r, root)), scores: values('scores', root).map(score), teacherClasses: scopedTeacherClasses.map((r) => teacherClass(r, root)), terms: values('terms', root), settings: { ...rawMap(root.settings), ...rawMap(root.systemSettings) } } };
   }
   function resultError(message) { return { success: false, message }; }
   async function adminOnly() {
-    await ready();
-    if (String(auth.currentUser && auth.currentUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
+    const identityUser = await verifiedIdentityUser();
+    if (String(identityUser && identityUser.email || '').trim().toLowerCase() !== 'suradet.t@wrk.ac.th') throw new Error('ฟังก์ชันนี้อนุญาตเฉพาะผู้ดูแลระบบ suradet.t@wrk.ac.th');
   }
-  async function staffProfileFromAuth(firebaseUser) {
-    const email = text(firebaseUser && firebaseUser.email).toLowerCase();
-    if (!email) return null;
+  async function verifiedIdentityUser() {
+    let identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__?.auth?.getSession) {
+      const result = await window.__SUPABASE_CLIENT__.auth.getSession();
+      identityUser = result?.data?.session?.user || identityUser;
+      if (identityUser) {
+        auth.currentUser = identityUser;
+        window.__FIREBASE_AUTH_USER = identityUser;
+      }
+    }
+    if (!identityUser) {
+      await ready();
+      identityUser = auth.currentUser || window.__FIREBASE_AUTH_USER || window.__SUPABASE_CLIENT__?.auth?.currentUser || null;
+    }
+    if (!identityUser || identityUser.isAnonymous || (!identityUser.id && !identityUser.uid) || !text(identityUser.email)) {
+      throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
+    }
+    return identityUser;
+  }
+  async function staffProfileForIdentity(identityUser) {
+    const email = text(identityUser && identityUser.email).toLowerCase();
     if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
       const { data: row, error } = await window.__SUPABASE_CLIENT__.from('app_users').select('*').eq('email', email).maybeSingle();
       if (error) throw error;
       const legacy = row && row.legacy_data && typeof row.legacy_data === 'object' ? row.legacy_data : {};
       return { ...legacy, ...(row || {}) };
     }
-    const indexedRoot = (await db.ref('authProfiles').once('value')).val() || {};
-    return Object.values(rawMap(indexedRoot)).find((row) => text(row.Email || row.email).toLowerCase() === email) || null;
+    const usersRoot = (await db.ref('/users').once('value')).val() || {};
+    return Object.values(usersRoot).find((row) =>
+      text(row.Email || row.email).toLowerCase() === email ||
+      text(row.AuthUID || row.auth_uid || row.uid).toLowerCase() === text(identityUser.id || identityUser.uid).toLowerCase()
+    ) || {};
   }
   async function teacherOrAdmin(payload) {
-    await ready();
-    const firebaseUser = auth.currentUser;
-    const firebaseEmail = String(firebaseUser && firebaseUser.email || '').toLowerCase();
-    if (firebaseEmail === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin' };
-    if (!firebaseUser || firebaseUser.isAnonymous || !firebaseUser.uid) {
-      throw new Error('กรุณาเข้าสู่ระบบด้วย Google ของบัญชีครูก่อนบันทึกข้อมูล');
-    }
-    const profile = await staffProfileFromAuth(firebaseUser) || (await db.ref(`authProfiles/${firebaseKey(firebaseUser.uid)}`).once('value')).val() || {};
+    const identityUser = await verifiedIdentityUser();
+    const email = String(identityUser && identityUser.email || '').trim().toLowerCase();
+    if (email === 'suradet.t@wrk.ac.th') return { admin: true, teacherId: 'admin', email };
+    // Supabase app_users is the single source of staff identity. Do not use
+    // the retired Firebase authProfiles/authEmailIndex nodes for authorization.
+    const profile = await staffProfileForIdentity(identityUser);
     const role = text(profile.Role || profile.role).toLowerCase();
     const status = text(profile.Status || profile.status).toLowerCase();
     if (status === 'inactive' || role !== 'teacher') throw new Error('บัญชี Google นี้ยังไม่มีสิทธิ์ครูที่อนุมัติแล้ว');
-    const teacherId = text(profile.UserID || profile.userId || profile.user_id || profile.id || profile.legacy_user_id);
-    if (!teacherId) throw new Error('บัญชีครูยังไม่มีรหัสผู้ใช้ที่ผูกกับสิทธิ์การสอน');
-    return { admin: false, teacherId, firebaseUid: firebaseUser.uid };
+    return { admin: false, teacherId: text(profile.UserID || profile.user_id || profile.id), supabaseUserId: identityUser.id || identityUser.uid, email };
   }
   async function teacherAssignmentOrAdmin(payload) {
     const authz = await teacherOrAdmin(payload);
@@ -861,15 +903,14 @@
     // This is on the login critical path and only needs the authenticated
     // teacher/admin identity record.
     if (name === 'getCurrentUserProfile') {
-      await ready();
+      const identityUser = await verifiedIdentityUser();
       const id = text(args[0]);
-      const email = String(auth.currentUser?.email || '').trim().toLowerCase();
+      const email = String(identityUser?.email || '').trim().toLowerCase();
       let record = null;
       if (window.__SUPABASE_MODE__) {
-        const root = await data();
-        const users = values('users', root);
-        record = users.find((row) => text(row.UserID || row.userId || row.user_id) === id || text(row.Email || row.email).toLowerCase() === email) || null;
-        if (email === 'suradet.t@wrk.ac.th' && id === 'admin') record = { UserID: 'admin', Username: email, Email: email, Name: auth.currentUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        record = await staffProfileForIdentity(identityUser);
+        if (email === 'suradet.t@wrk.ac.th' && (id === 'admin' || !record || !Object.keys(record).length)) record = { UserID: 'admin', Username: email, Email: email, Name: identityUser.displayName || 'สุรเดช ธรรมประโชติ', Role: 'admin', Status: 'Active' };
+        if (record && id && text(record.UserID || record.userId || record.user_id || record.id) !== id && email !== 'suradet.t@wrk.ac.th') record = null;
         return record ? { success: true, data: user(record) } : resultError('ไม่พบผู้ใช้');
       }
       if (email === 'suradet.t@wrk.ac.th') {
@@ -1120,10 +1161,10 @@
       const teacherScope = values('teacherClasses', root).filter((r) => matchesTerm(r.TermID || r.Term || r.term, selected, root) && text(r.TeacherID || r.teacherId) === text(arg.user && arg.user.id) && text(r.Status || r.status).toLowerCase() !== 'inactive');
       const allowedStudent = (r) => role === 'admin' || teacherScope.some((x) => text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
       const allowedAssignment = (r) => role === 'admin' || teacherScope.some((x) => text(x.SubjectCode || x.subjectCode) === text(r.SubjectCode) && text(x.Level || x.level) === text(r.Level) && text(x.Room || x.room) === text(r.Room));
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedStudent(r));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedStudent(r));
       const studentIds = new Set(students.map((r) => text(r.StudentID)));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && allowedAssignment(r));
-      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(r.Term, selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && allowedAssignment(r));
+      const attendanceRows = values('attendance', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (role === 'admin' || studentIds.has(text(r.StudentID))));
       const date = text(arg.date);
       const dayRows = date ? attendanceRows.filter((r) => text(r.Date).slice(0, 10) === date) : attendanceRows;
       const status = (value) => text(value).toLowerCase();
@@ -1145,11 +1186,11 @@
     }
     if (name === 'loadScoresGrid') {
       const selected = activeTerm(root, arg.term);
-      const students = values('students', root).filter((r) => matchesTerm(r.Term, selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
-      const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term, selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
+      const students = values('students', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && (!arg.level || text(r.Level) === text(arg.level)) && (!arg.room || text(r.Room) === text(arg.room))).map((r) => student(r, root));
+      const assignments = values('assignments', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && text(r.SubjectCode) === text(arg.subjectCode || arg.subject) && text(r.Level) === text(arg.level) && text(r.Room) === text(arg.room)).map((r) => assignment(r, root));
       const assignmentIds = new Set(assignments.map((a) => a.id)); const studentIds = new Set(students.map((s) => s.id)); const scores = {};
       const orphanScores = [];
-      values('scores', root).filter((r) => matchesTerm(r.Term, selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
+      values('scores', root).filter((r) => matchesTerm(recordTerm(r), selected, root) && studentIds.has(text(r.StudentID))).forEach((r) => {
         const assignmentId = text(r.AssignmentID || r.assignmentId);
         if (assignmentIds.has(assignmentId)) scores[`${assignmentId}_${text(r.StudentID)}`] = score(r);
         else orphanScores.push({ scoreId: text(r.ScoreID || r.scoreId), assignmentId, studentId: text(r.StudentID || r.studentId), subjectCode: text(r.SubjectCode || r.subjectCode), term: text(r.TermID || r.Term || r.term), score: r.Score ?? r.score ?? '', isSubmitted: r.IsSubmitted ?? r.isSubmitted ?? '' });

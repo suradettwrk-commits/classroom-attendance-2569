@@ -670,12 +670,12 @@
             </div>
         </div>
 
-        <!-- TAB: GRADING SYSTEM (NATIVE FIREBASE) -->
+        <!-- TAB: GRADING SYSTEM (NATIVE SUPABASE) -->
         <div id="tab-grading" class="content-tab hidden p-4 md:p-8 space-y-5 fade-in">
             <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                     <h2 class="text-2xl font-extrabold text-slate-800"><i class="fa-solid fa-graduation-cap text-indigo-600 mr-2"></i>ตัดเกรด ป.พ.</h2>
-                    <p class="text-sm text-slate-500">ทำงานบนฐานข้อมูล Firebase เดียวกับนักเรียน งาน และคะแนนของระบบหลัก</p>
+                    <p class="text-sm text-slate-500">ทำงานบนฐานข้อมูล Supabase เดียวกับนักเรียน งาน และคะแนนของระบบหลัก</p>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
@@ -887,7 +887,7 @@
 
             <section id="settings-panel-grading" class="settings-panel hidden bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
                 <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-graduation-cap text-school-primary"></i> Grading System Integration</h3>
-                <p class="text-sm text-green-700 bg-green-50 border border-green-100 rounded-xl p-4"><i class="fa-solid fa-circle-check mr-2"></i>ระบบตัดเกรดถูกฝังอยู่ในแท็บ “ตัดเกรด ป.พ.” ของระบบหลักแล้ว ใช้ Firebase ชุดเดียวกัน ไม่ต้องตั้งค่า URL หรือเปิดระบบแยก</p>
+                <p class="text-sm text-green-700 bg-green-50 border border-green-100 rounded-xl p-4"><i class="fa-solid fa-circle-check mr-2"></i>ระบบตัดเกรดถูกฝังอยู่ในแท็บ “ตัดเกรด ป.พ.” ของระบบหลักแล้ว ใช้ Supabase ชุดเดียวกัน ไม่ต้องตั้งค่า URL หรือเปิดระบบแยก</p>
             </section>
         </div>
     </main>
@@ -1348,7 +1348,7 @@
             let persistedUser = null;
             try { persistedUser = JSON.parse(sessionStorage.getItem('wrk_school_session') || 'null'); } catch (e) {}
             // Use the verified account email as the stable queue namespace.
-            // Firebase UID may be unavailable briefly during Auth restoration.
+            // Supabase Auth UID may be unavailable briefly during restoration.
             const identity = (authUser && authUser.email) || (localUser && (localUser.email || localUser.Email)) || (persistedUser && (persistedUser.email || persistedUser.Email)) || (authUser && authUser.uid) || (localUser && localUser.id) || 'anonymous';
             const safe = String(identity).trim().replace(/[^A-Za-z0-9_-]/g, '_');
             return 'sync_queue_' + (safe || 'anonymous');
@@ -1391,7 +1391,7 @@
             const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
             if (role !== 'teacher') return true;
             // Teachers may update only the status of students in their
-            // assigned rooms. The Firebase write path enforces that scope;
+            // assigned rooms. The Supabase write path enforces that scope;
             // do not leave valid STUDENT status tasks permanently blocked in
             // the client queue.
             return !['DELETE_STUDENT', 'USER', 'DELETE_USER', 'SUBJECT', 'DELETE_SUBJECT'].includes(String(task && task.type || '').toUpperCase());
@@ -1402,12 +1402,15 @@
         }
 
         hasVerifiedWriteIdentity() {
-            const authUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+            const authUser = ((window.firebase && firebase.auth) ? firebase.auth().currentUser : null)
+                || window.__FIREBASE_AUTH_USER
+                || window.__SUPABASE_CLIENT__?.auth?.currentUser;
             const currentEmail = String(CURRENT_USER && (CURRENT_USER.email || CURRENT_USER.Email) || '').trim().toLowerCase();
             const authEmail = String(authUser && authUser.email || '').trim().toLowerCase();
-            if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail || !currentEmail || currentEmail !== authEmail) return false;
+            if (!CURRENT_USER || !CURRENT_USER.id || !authUser || authUser.isAnonymous || !authEmail) return false;
             const role = String(CURRENT_USER.role || '').toLowerCase();
-            return role !== 'admin' || authEmail === 'suradet.t@wrk.ac.th';
+            if (role === 'admin') return authEmail === 'suradet.t@wrk.ac.th';
+            return !currentEmail || currentEmail === authEmail;
         }
 
         attendanceKey(payload) {
@@ -1552,7 +1555,7 @@
             const waitingForAuth = this.queue.some(task => this.requiresVerifiedAuth(task)) && !this.hasVerifiedWriteIdentity();
             if (waitingForAuth) {
                 this.updateUI('auth-wait');
-                console.warn('SYNC_ENGINE: waiting for verified Firebase Auth before sending queued data');
+                console.warn('SYNC_ENGINE: waiting for verified Supabase Auth before sending queued data');
                 return;
             }
 
@@ -1565,7 +1568,7 @@
 
             // Recover score and student-status tasks created by an older build
             // that marked them blocked after a few failures. Both writes are
-            // now protected by their current Firebase authorization path.
+            // now protected by their current Supabase authorization path.
             let recoveredRetryableTask = false;
             this.queue.forEach(task => {
                 const previousError = String(task.lastError || '').toLowerCase();
@@ -1852,7 +1855,7 @@
     window.clearPendingSyncQueue = async () => {
         const queue = SYNC_ENGINE && Array.isArray(SYNC_ENGINE.queue) ? SYNC_ENGINE.queue : [];
         if (!queue.length) return;
-        const result = await Swal.fire({ icon: 'warning', title: 'ล้างคิวซิงก์ค้าง?', text: `จะลบเฉพาะคิวในเครื่องนี้ ${queue.length} รายการ ข้อมูลบน Firebase จะไม่ถูกลบ`, showCancelButton: true, confirmButtonText: 'ยืนยันล้างคิว', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc2626' });
+        const result = await Swal.fire({ icon: 'warning', title: 'ล้างคิวซิงก์ค้าง?', text: `จะลบเฉพาะคิวในเครื่องนี้ ${queue.length} รายการ ข้อมูลบน Supabase จะไม่ถูกลบ`, showCancelButton: true, confirmButtonText: 'ยืนยันล้างคิว', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc2626' });
         if (!result.isConfirmed) return;
         SYNC_ENGINE.pause();
         const key = SYNC_ENGINE.storageKey;
@@ -1861,7 +1864,7 @@
         SYNC_ENGINE.activeTaskId = null;
         SYNC_ENGINE.isSyncing = false;
         SYNC_ENGINE.updateUI('synced');
-        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'ล้างคิวซิงก์แล้ว', text: 'ข้อมูลบน Firebase ไม่ถูกลบ', showConfirmButton: false, timer: 1800 });
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'ล้างคิวซิงก์แล้ว', text: 'ข้อมูลบน Supabase ไม่ถูกลบ', showConfirmButton: false, timer: 1800 });
     };
 
     function getStudentFirstName(student) {
@@ -2170,6 +2173,7 @@
             const rows = result && result.success ? (result.data || []) : [];
             const subjects = rows.map(normalizeSubjectRecord).filter(s => s.code);
             if (!subjects.length) return;
+            const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             window.SUBJECTS_CACHE = subjects;
             window.__SHARED_SUBJECTS = subjects;
             populateSelects({ subjects });
@@ -6091,7 +6095,7 @@
     window.CURRENT_SETTINGS_TAB = window.CURRENT_SETTINGS_TAB || 'users';
 
     function getAdminSettingsBootstrapCacheKey(term) {
-        // Version the cache so a previous empty/partial bootstrap cannot hide newly restored Firebase data.
+            // Version the cache so a previous empty/partial bootstrap cannot hide newly restored Supabase data.
         return `ADMIN_SETTINGS_BOOTSTRAP_V3_${normalizeTermForUI(term || window.CURRENT_SERVER_TERM)}_${getCurrentUserIdForCache()}`;
     }
 
@@ -6446,7 +6450,7 @@
             activeBtn.classList.remove('text-slate-600', 'hover:bg-slate-50');
         }
         if (tab === 'users') {
-            // Always refresh the admin user table from Firebase. This avoids a
+            // Always refresh the admin user table from Supabase. This avoids a
             // stale/empty bootstrap cache hiding teachers from the assignment form.
             loadAdminSettingsBootstrap(false, () => { filterUsers(); loadUsers(); });
         } else if (tab === 'terms') {
@@ -7386,6 +7390,7 @@
         if (termSelect) delete termSelect.dataset.syncTerm;
         const liveDb = typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db ? DATA_CONTROLLER.db : {};
         const role = String(CURRENT_USER?.role || '').toLowerCase();
+        const isAdmin = role === 'admin' || String(CURRENT_USER?.email || CURRENT_USER?.Email || '').trim().toLowerCase() === 'suradet.t@wrk.ac.th';
         const teacherId = String(CURRENT_USER?.id || '');
         // Prefer a populated bootstrap scope, but do not let an empty/stale
         // bootstrap array hide the realtime class permissions.
@@ -7421,7 +7426,7 @@
         };
         const termClasses = allClasses.filter(termMatchesClass);
         const usableClasses = termClasses.length ? termClasses : allClasses;
-        const scopedClasses = (role === 'admin' ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
+        const scopedClasses = (isAdmin ? usableClasses : usableClasses.filter(c => !teacherId || classValue(c, ['teacherId', 'TeacherID', 'teacher_id']) === teacherId));
         const classSubject = c => classValue(c, ['subjectCode', 'SubjectCode', 'subject', 'subject_code']);
         const classLevel = c => classValue(c, ['level', 'Level', 'classLevel', 'class_level']);
         const classRoom = c => classValue(c, ['room', 'Room', 'classRoom', 'class_room']);
@@ -7451,7 +7456,7 @@
             }
         }
         if (!normalizedSubjects.length) normalizedSubjects = getSubjectCatalogFallback();
-        const subjects = normalizedSubjects.filter(s => role === 'admin' || scopedSubjectCodes.has(s.code));
+        const subjects = normalizedSubjects.filter(s => isAdmin || scopedSubjectCodes.has(s.code));
         const selectedSubject = getEl('grading-subject')?.value || '';
         gradingFillSelect('grading-subject', subjects.map(s => ({ value: s.code, label: `${s.code} ${s.name}`.trim() })), selectedSubject);
         const activeSubject = getEl('grading-subject')?.value || selectedSubject;
@@ -7465,10 +7470,13 @@
             const room = String(s.room || s.Room || '').trim();
             return [`${level}|${room}`, { level, room }];
         }).filter(([, value]) => value.level && value.room))].map(([, value]) => value);
-        // Admins can inspect every class represented by the shared student
-        // database. Teachers remain restricted to their configured classes.
-        const subjectClasses = role === 'admin'
-            ? (adminStudentClasses.length ? adminStudentClasses : usableClasses)
+        // Admins can inspect every class configured for the selected subject.
+        // Do not derive this from the student list: that loses the subject ↔
+        // class permission mapping and makes every subject look identical.
+        // Teachers remain restricted to their own configured classes.
+        const adminSubjectClasses = usableClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
+        const subjectClasses = isAdmin
+            ? (adminSubjectClasses.length ? adminSubjectClasses : (adminStudentClasses.length ? adminStudentClasses : usableClasses))
             : scopedClasses.filter(c => !activeSubject || classSubject(c) === String(activeSubject));
         const naturalSort = (a, b) => (parseInt(String(a).match(/\d+/)?.[0] || '999', 10) - parseInt(String(b).match(/\d+/)?.[0] || '999', 10)) || String(a).localeCompare(String(b), 'th');
         // On a cold production session the shared student snapshot can arrive
@@ -7477,13 +7485,16 @@
         // blank while the realtime snapshot catches up.
         const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
         const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
-        const levelValues = [...new Set((subjectClasses.map(classLevel).filter(Boolean).length ? subjectClasses.map(classLevel).filter(Boolean) : scopedLevelOptions))].sort(naturalSort);
+        const levelOptions = subjectClasses.map(classLevel).filter(Boolean);
+        // Once a subject is selected, dependent filters must come only from
+        // that subject's configured classes. Never reuse the previous
+        // subject's level/room as a fallback; that can send CRUD writes to
+        // the wrong classroom.
+        const levelValues = [...new Set(levelOptions.length ? levelOptions : (activeSubject ? [] : scopedLevelOptions))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
-        const scopedRoomsForLevel = scopedRoomOptions;
-        const roomValues = [...new Set((subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean).length
-            ? subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean)
-            : scopedRoomsForLevel))].sort(naturalSort);
+        const roomOptions = subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean);
+        const roomValues = [...new Set(roomOptions.length ? roomOptions : (activeSubject ? [] : scopedRoomOptions))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
@@ -7526,7 +7537,7 @@
             if (requestSeq !== grading.loadSeq || !payload) return;
             if (gradingHasPendingEdits()) {
                 grading.realtimePending = payload;
-                return gradingSetStatus('มีข้อมูลตัดเกรดใหม่จาก Firebase แต่จะไม่ทับข้อมูลที่กำลังกรอก', 'info');
+                return gradingSetStatus('มีข้อมูลตัดเกรดใหม่จาก Supabase แต่จะไม่ทับข้อมูลที่กำลังกรอก', 'info');
             }
             grading.data = payload; LocalStore.set(cacheKey, payload); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(payload.exams || {})); grading.history = [nativeSnapshot()]; grading.future = [];
             const s = payload.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value;
@@ -7545,7 +7556,7 @@
             if (typeof grading.realtimeUnsubscribe === 'function') grading.realtimeUnsubscribe();
             grading.realtimeKey = cacheKey;
             grading.realtimePending = null;
-            gradingSetStatus('กำลังโหลดข้อมูลตัดเกรดจาก Firebase แบบเรียลไทม์...', 'info');
+            gradingSetStatus('กำลังโหลดข้อมูลตัดเกรดจาก Supabase แบบเรียลไทม์...', 'info');
             grading.realtimeUnsubscribe = window.firebaseSubscribeGradingData(filter, response => {
                 if (!response || !response.success || !response.data || requestSeq !== grading.loadSeq) return;
                 applyData(response.data, 'อัปเดตล่าสุด');
@@ -7555,9 +7566,9 @@
                 grading.realtimeUnsubscribe = null;
                 if (!grading.realtimeFallbackUsed) {
                     grading.realtimeFallbackUsed = true;
-                    gradingSetStatus('เรียลไทม์ตอบช้า กำลังโหลดข้อมูลสำรองจาก Firebase...', 'info');
+                    gradingSetStatus('เรียลไทม์ตอบช้า กำลังโหลดข้อมูลสำรองจาก Supabase...', 'info');
                     loadNativeGradingData(true);
-                } else if (!grading.data) gradingSetStatus('โหลดข้อมูลตัดเกรดจาก Firebase ไม่สำเร็จ', 'error');
+                } else if (!grading.data) gradingSetStatus('โหลดข้อมูลตัดเกรดจาก Supabase ไม่สำเร็จ', 'error');
             });
             return;
         }
@@ -7565,7 +7576,7 @@
         if (cached && Array.isArray(cached.students) && cached.students.length) {
             grading.data = cached; grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(cached.exams || {})); grading.history = [nativeSnapshot()]; grading.future = []; renderNativeGradingTable(cached); gradingSetStatus(`แสดงข้อมูลจากเครื่อง ${cached.students.length} คน | กำลังตรวจสอบข้อมูลล่าสุด...`, 'info');
         }
-        gradingSetStatus('กำลังโหลดข้อมูลจาก Firebase...', 'info');
+        gradingSetStatus('กำลังโหลดข้อมูลจาก Supabase...', 'info');
         google.script.run.withSuccessHandler(res => { if (requestSeq !== grading.loadSeq) return; if (!res || !res.success) return gradingSetStatus(res?.message || 'โหลดข้อมูลไม่สำเร็จ', 'error'); if ((grading.revision || 0) !== revisionAtRequest && (Object.keys(grading.dirty || {}).length || grading.settingsDirty)) return gradingSetStatus('มีการแก้ไขใหม่ระหว่างโหลด จึงไม่ทับข้อมูลที่กำลังกรอก', 'info'); grading.data = res.data; LocalStore.set(cacheKey, res.data); grading.dirty = {}; grading.settingsDirty = false; grading.lastFilter = { term: filter.term, subject: filter.subject, level: filter.level, room: filter.room }; grading.base = JSON.parse(JSON.stringify(res.data.exams || {})); grading.history = [nativeSnapshot()]; grading.future = []; const s = res.data.settings || {}; ['pre','mid','post','final'].forEach(k => { const el = getEl(`grading-w-${k}`); if (el) el.value = s[`weight${k.charAt(0).toUpperCase()+k.slice(1)}`] ?? el.value; }); const goal = getEl('grading-goal'); if (goal) goal.value = s.goalPercent ?? goal.value; renderNativeGradingTable(res.data); gradingSetStatus(`โหลดแล้ว ${res.data.students.length} คน | งาน ${res.data.assignments.length} รายการ`, 'success'); }).withFailureHandler(err => { if (requestSeq === grading.loadSeq) gradingSetStatus(String(err), 'error'); }).getGradingData(filter);
     }
     function saveNativeGradingData(auto = false) {
