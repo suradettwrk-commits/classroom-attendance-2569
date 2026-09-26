@@ -7462,11 +7462,15 @@
         const scopedLevelOptions = [...(getEl('sc-level')?.options || [])].map(option => option.value).filter(Boolean);
         const scopedRoomOptions = [...(getEl('sc-room')?.options || [])].map(option => option.value).filter(Boolean);
         const levelOptions = subjectClasses.map(classLevel).filter(Boolean);
-        const levelValues = [...new Set(levelOptions.length ? levelOptions : scopedLevelOptions)].sort(naturalSort);
+        // Once a subject is selected, dependent filters must come only from
+        // that subject's configured classes. Never reuse the previous
+        // subject's level/room as a fallback; that can send CRUD writes to
+        // the wrong classroom.
+        const levelValues = [...new Set(levelOptions.length ? levelOptions : (activeSubject ? [] : scopedLevelOptions))].sort(naturalSort);
         gradingFillSelect('grading-level', levelValues, getEl('grading-level')?.value);
         const activeLevel = getEl('grading-level')?.value || '';
         const roomOptions = subjectClasses.filter(c => !activeLevel || classLevel(c) === String(activeLevel)).map(classRoom).filter(Boolean);
-        const roomValues = [...new Set(roomOptions.length ? roomOptions : scopedRoomOptions)].sort(naturalSort);
+        const roomValues = [...new Set(roomOptions.length ? roomOptions : (activeSubject && activeLevel ? [] : scopedRoomOptions))].sort(naturalSort);
         gradingFillSelect('grading-room', roomValues, getEl('grading-room')?.value);
     }
     function renderNativeGradingTable(data) {
