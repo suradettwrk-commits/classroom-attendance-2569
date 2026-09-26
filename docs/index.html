@@ -4411,10 +4411,11 @@ var DATA_CONTROLLER = new DataController();
             if (!subjects.length) return;
             window.SUBJECTS_CACHE = subjects;
             populateSelects({ subjects });
-            if (typeof isTabVisible === 'function' && isTabVisible('tab-grading')) {
-                populateNativeGradingFilters();
-                loadNativeGradingData();
-            }
+            // The tab can be switching while this async read completes;
+            // hydrate the native grading selects regardless of the transient
+            // visibility state, then load its table when the filters exist.
+            if (typeof populateNativeGradingFilters === 'function') populateNativeGradingFilters();
+            if (typeof loadNativeGradingData === 'function' && getEl('grading-subject')) loadNativeGradingData();
         }).withFailureHandler(err => console.warn('Subject catalog read fallback failed:', String(err))).getSubjects();
 
         google.script.run.withSuccessHandler(res => {
