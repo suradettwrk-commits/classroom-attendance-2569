@@ -334,7 +334,7 @@ window.supabaseConfig = {
   const SCORE_REALTIME_BOOT_TIMEOUT_MS = 18000;
   // Writes must fail back to the durable local queue instead of leaving the
   // UI in a permanent "saving" state when Supabase never completes a request.
-  const STUDENT_WRITE_CALL_TIMEOUT_MS = 20000;
+  const STUDENT_WRITE_CALL_TIMEOUT_MS = 45000;
 
   function readTerms() {
     // All realtime and one-shot reads must wait for Supabase Auth restoration.
