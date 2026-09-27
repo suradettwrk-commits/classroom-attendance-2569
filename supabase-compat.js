@@ -309,7 +309,11 @@
   function payloadFor(name, key, value) {
     const table = tableName(name);
     if (name === 'settings' || name === 'systemSettings') {
-      const settingKey = key || text(value && (value.Key || value.key));
+      // Firebase-style update paths escape characters such as `/` and `|`.
+      // Persist the canonical setting key from the payload instead, otherwise
+      // gradingData cannot find the row after reload even when the upsert
+      // itself succeeds.
+      const settingKey = text(value && (value.Key || value.key)) || key;
       const rawTermId = value && (value.TermID || value.term_id);
       const payload = { setting_key: settingKey, term_id: rawTermId ? canonicalTermId(rawTermId) : null, value: value && (value.Value ?? value.value ?? value), updated_at: new Date().toISOString() };
       return { table: 'settings', idCol: 'setting_key', payload };
