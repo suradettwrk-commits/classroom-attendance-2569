@@ -170,9 +170,11 @@
         
         function saveSession(userObj) {
             if (!userObj) return;
-            // รูป Base64 อาจมีขนาดใหญ่กว่าพื้นที่ของ sessionStorage จึงไม่เก็บรูปไว้ใน session
             const sessionUser = { ...userObj };
-            if (typeof sessionUser.imageUrl === 'string' && sessionUser.imageUrl.startsWith('data:image/')) delete sessionUser.imageUrl;
+            // Keep a reasonably sized profile image across a hard reload. A
+            // missing image from the auth/profile refresh must not erase the
+            // image that was already available in the verified session.
+            if (typeof sessionUser.imageUrl === 'string' && sessionUser.imageUrl.startsWith('data:image/') && sessionUser.imageUrl.length > 400000) delete sessionUser.imageUrl;
             delete sessionUser.password;
             delete sessionUser.authUser;
             try {
@@ -225,7 +227,7 @@
                     setLoading(true, 'กำลังกู้คืนบัญชี Google...');
                     window.firebaseSignInWithGoogle({ revalidateOnly: true }).then((result) => {
                         if (result && result.success && result.user) {
-                            CURRENT_USER = result.user;
+                            CURRENT_USER = { ...result.user, imageUrl: result.user.imageUrl || localUser.imageUrl || '' };
                             saveSession(CURRENT_USER);
                             renderAppByRole();
                         } else {
@@ -294,7 +296,7 @@
                     setLoading(true, 'กำลังยืนยันข้อมูลผู้ใช้...');
                     window.firebaseSignInWithGoogle().then((result) => {
                         if (result && result.success && result.user) {
-                            CURRENT_USER = result.user;
+                            CURRENT_USER = { ...result.user, imageUrl: result.user.imageUrl || localUser.imageUrl || '' };
                             saveSession(CURRENT_USER);
                             renderAppByRole();
                         } else {
