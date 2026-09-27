@@ -3612,6 +3612,7 @@
             const db = typeof DATA_CONTROLLER !== 'undefined' ? DATA_CONTROLLER.db : null;
             (db && Array.isArray(db.combos) ? db.combos : []).forEach(add);
             (db && Array.isArray(db.teacherClasses) ? db.teacherClasses : []).forEach(add);
+            assignmentTargetClassRows.forEach(add);
             return [...new Set(rows)].sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
         };
         const renderAssignmentTargetRooms = () => {
@@ -3629,10 +3630,15 @@
         };
         const selectedAssignmentTargetRooms = () => [...document.querySelectorAll('#asn-multi-room-list .asn-target-room:checked')].map(input => String(input.value || '').trim()).filter(Boolean);
 
-        const openAddModal = () => {
+        const openAddModal = async () => {
             if(!els.filters.subject.value) return Swal.fire('เตือน', 'กรุณาเลือกวิชาก่อน', 'warning');
             if(!els.filters.level.value || !els.filters.room.value) return Swal.fire('เตือน', 'กรุณาเลือกวิชา ระดับชั้น และห้องเรียนก่อน', 'warning');
-            
+            try {
+                await hydrateCopyAssignments();
+            } catch (error) {
+                console.warn('ASSIGNMENT_TARGET_SCOPE_READ_FAILED', error && error.message ? error.message : error);
+            }
+
             document.getElementById('assignment-form').reset();
             document.getElementById('asn-id').value = '';
             document.getElementById('asn-modal-title').innerText = 'เพิ่มงานใหม่';
@@ -3688,12 +3694,15 @@
         };
 
         let copySourceRows = [];
+        let copyAssignmentsCatalog = [];
+        let assignmentTargetClassRows = [];
         let copyAssignmentsHydratedKey = '';
         const copyField = (a, lower, upper, fallback = '') => a && (a[lower] ?? a[upper] ?? fallback);
         const copySignature = (a) => [copyField(a, 'title', 'Title'), copyField(a, 'type', 'Type', 'Score'), Number(copyField(a, 'maxScore', 'MaxScore', 0)), copyField(a, 'dueDate', 'DueDate')].map(v => String(v ?? '').trim()).join('|');
         const getCopyAssignments = () => {
             const rows = []; const seen = new Set();
             const add = a => { const id = String(copyField(a, 'id', 'AssignmentID', '')); if (id && !seen.has(id)) { seen.add(id); rows.push(a); } };
+            copyAssignmentsCatalog.forEach(add);
             if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db && Array.isArray(DATA_CONTROLLER.db.assignments)) DATA_CONTROLLER.db.assignments.forEach(add);
             state.assignments.forEach(add); return rows;
         };
@@ -3722,6 +3731,8 @@
                 user: CURRENT_USER
             });
             const rows = result && result.data && Array.isArray(result.data.assignments) ? result.data.assignments : [];
+            copyAssignmentsCatalog = rows;
+            assignmentTargetClassRows = result && result.data && Array.isArray(result.data.teacherClasses) ? result.data.teacherClasses : [];
             if (rows.length && typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
                 const merged = new Map(getCopyAssignments().map(a => [String(copyField(a, 'id', 'AssignmentID', '')), a]));
                 rows.forEach(row => {
