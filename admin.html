@@ -1988,6 +1988,11 @@
         return [prefix, term, userId].concat(parts || []).join('_');
     }
 
+    function usableProfileImageUrl(value) {
+        const url = String(value || '').trim();
+        return /^(?:https?:\/\/|data:image\/(?:png|jpe?g|gif|webp);base64,)/i.test(url) ? url : '';
+    }
+
     // --- PRELOADER ---
     const DataPreloader = {
         init: () => {
@@ -2076,8 +2081,8 @@
             if(getEl('header-user-name')) getEl('header-user-name').innerText = CURRENT_USER.name;
             if(getEl('dash-user-name')) getEl('dash-user-name').innerText = CURRENT_USER.name;
             if(getEl('popover-user-name')) getEl('popover-user-name').innerText = CURRENT_USER.name;
-            if (CURRENT_USER.imageUrl) {
-                const imgUrl = CURRENT_USER.imageUrl;
+            const imgUrl = usableProfileImageUrl(CURRENT_USER.imageUrl);
+            if (imgUrl) {
                 document.querySelectorAll('#header-profile-img, #popover-profile-img, #dash-profile-img, #modal-profile-img').forEach(img => img.src = imgUrl);
             }
             if (CURRENT_USER.role !== 'admin') {
