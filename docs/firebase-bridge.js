@@ -1122,7 +1122,7 @@
       });
       if (conflicts.length) return { success: false, conflict: true, conflicts, message: `พบข้อมูลถูกแก้ไขจากอุปกรณ์อื่น ${conflicts.length} ช่อง จึงไม่เขียนทับข้อมูลเดิม` };
       const settingKey = [term, subjectCode, level, room].join('|');
-      updates[`settings/${firebaseKey(`grading_${settingKey}`)}`] = { Key: `grading_${settingKey}`, WeightPre: weights[0], WeightMid: weights[1], WeightPost: weights[2], WeightFinal: weights[3], GoalPercent: goalPercent, UpdatedAt: new Date().toISOString() };
+      updates[`settings/${firebaseKey(`grading_${settingKey}`)}`] = { Key: `grading_${settingKey}`, TermID: canonicalTermId(term, root), WeightPre: weights[0], WeightMid: weights[1], WeightPost: weights[2], WeightFinal: weights[3], GoalPercent: goalPercent, UpdatedAt: new Date().toISOString() };
       await db.ref('/').update(updates);
       snapshotPromise = null;
       return { success: true, saved: Object.keys(updates).filter((key) => key.startsWith('scores/')).length, message: 'บันทึกคะแนนและสัดส่วนสำเร็จ' };
@@ -1173,7 +1173,7 @@
       const goalPercent = Number(arg.goalPercent);
       if (!Number.isFinite(goalPercent) || goalPercent < 0 || goalPercent > 100) throw new Error('เป้าหมายเกรดต้องอยู่ระหว่าง 0 ถึง 100');
       const key = [term, text(arg.subject), text(arg.level), text(arg.room)].join('|');
-      await db.ref(`settings/${firebaseKey(`grading_${key}`)}`).set({ Key: `grading_${key}`, WeightPre: weights[0], WeightMid: weights[1], WeightPost: weights[2], WeightFinal: weights[3], GoalPercent: goalPercent, UpdatedAt: new Date().toISOString() });
+      await db.ref(`settings/${firebaseKey(`grading_${key}`)}`).set({ Key: `grading_${key}`, TermID: canonicalTermId(term, root), WeightPre: weights[0], WeightMid: weights[1], WeightPost: weights[2], WeightFinal: weights[3], GoalPercent: goalPercent, UpdatedAt: new Date().toISOString() });
       snapshotPromise = null;
       return { success: true };
     }

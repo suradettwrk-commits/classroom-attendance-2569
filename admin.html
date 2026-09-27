@@ -1423,7 +1423,15 @@
             this.scoreFlushTimer = setTimeout(() => {
                 this.scoreFlushTimer = null;
                 this.process();
-            }, 650);
+            }, 150);
+        }
+
+        flushScoresNow() {
+            if (this.scoreFlushTimer) {
+                clearTimeout(this.scoreFlushTimer);
+                this.scoreFlushTimer = null;
+            }
+            this.process();
         }
 
         isAttendanceLocked(payload) {
@@ -1504,6 +1512,7 @@
                     targetTask.id = Date.now();
                     this.save();
                     this.updateUI('pending');
+                    this.scheduleScoreFlush();
                     return;
                 }
             }
@@ -3738,6 +3747,7 @@
                 records.push({ assignmentId: asnId, studentId: stdId, score: raw.score !== undefined ? raw.score : '', isSubmitted: assignment.type === 'Check' ? (isCheckSubmitted(raw) ? 1 : 0) : (raw.isSubmitted ? 1 : 0) });
             });
             SYNC_ENGINE.enqueue('SCORE', { term: state.filter.term || window.CURRENT_SERVER_TERM, subject: state.filter.subject, subjectCode: state.filter.subject, level: state.filter.level, room: state.filter.room, user: CURRENT_USER, records });
+            SYNC_ENGINE.flushScoresNow();
             console.log('SCORE_SAVE_DIRTY queued records=' + records.length);
             return;
 
@@ -7594,7 +7604,15 @@
             if (changedDuringSave) return;
             grading.dirty = {}; grading.settingsDirty = false;
             gradingSetStatus(`บันทึก${auto ? 'อัตโนมัติ' : ''}สำเร็จ ${res.saved || 0} รายการ`, 'success');
-            loadNativeGradingData();
+            if (grading.data) {
+                grading.data.exams = grading.data.exams || {};
+                Object.entries(records).forEach(([studentId, changes]) => {
+                    grading.data.exams[studentId] = { ...(grading.data.exams[studentId] || {}), ...changes };
+                });
+                grading.data.settings = { ...(grading.data.settings || {}), ...settingsAtStart, goalPercent: Number(settingsAtStart.goalPercent) };
+                grading.base = JSON.parse(JSON.stringify(grading.data.exams));
+                renderNativeGradingTable(grading.data);
+            }
         }).withFailureHandler(err => { const normalized = typeof window.normalizeWriteError === 'function' ? window.normalizeWriteError(err) : { message: err && err.message ? err.message : String(err), retryable: true }; fail(normalized.message, normalized.retryable); }).saveGradingBatch({ ...filter, ...settingsAtStart, records, baseRecords: JSON.parse(JSON.stringify(grading.base || {})) });
     }
     function printNativeGrading() {

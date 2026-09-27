@@ -269,7 +269,8 @@
     const table = tableName(name);
     if (name === 'settings' || name === 'systemSettings') {
       const settingKey = key || text(value && (value.Key || value.key));
-      const payload = { setting_key: settingKey, term_id: value && (value.TermID || value.term_id || null), value: value && (value.Value ?? value.value ?? value), updated_at: new Date().toISOString() };
+      const rawTermId = value && (value.TermID || value.term_id);
+      const payload = { setting_key: settingKey, term_id: rawTermId ? canonicalTermId(rawTermId) : null, value: value && (value.Value ?? value.value ?? value), updated_at: new Date().toISOString() };
       return { table: 'settings', idCol: 'setting_key', payload };
     }
     const columns = { terms: 'term_id', students: 'student_id', subjects: 'subject_code', teacherClasses: 'teacher_class_id', assignments: 'assignment_id', attendance: 'record_id', scores: 'score_id', users: 'user_id', authProfiles: 'id' };
@@ -309,6 +310,34 @@
       }
     }
   }
+  function applyRootUpdate(values) {
+    if (!rootCache) return;
+    for (const [path, value] of Object.entries(values || {})) {
+      const parts = pathParts(path); if (parts.length < 2) continue;
+      const name = reverseTableMap[parts[0]] || parts[0], key = parts[1];
+      rootCache[name] = rootCache[name] || {};
+      if (value === null) delete rootCache[name][key];
+      else rootCache[name][key] = clone(value);
+      if (name === 'settings') {
+        rootCache.systemSettings = rootCache.systemSettings || {};
+        if (value === null) delete rootCache.systemSettings[key];
+        else rootCache.systemSettings[key] = { Key: key, Value: value.Value ?? value.value ?? value };
+      }
+    }
+  }
+  function notifyListenersFromCache() {
+    listeners.slice().forEach(({ ref, handler }) => {
+      let value = rootCache || {};
+      for (const part of pathParts(ref.path)) value = value == null ? undefined : value[part];
+      if (ref.order && value && typeof value === 'object') value = Object.fromEntries(Object.entries(value).filter(([, row]) => text(row && (row[ref.order] ?? row[ref.order[0]?.toUpperCase() + ref.order.slice(1)])) === text(ref.equal)));
+      handler({ val: () => clone(value || {}) });
+    });
+  }
+  function commitRootCache(values) {
+    applyRootUpdate(values);
+    rootPromise = Promise.resolve(clone(rootCache || {}));
+    notifyListenersFromCache();
+  }
   class Ref {
     constructor(path, order, equal) { this.path=String(path||'').replace(/^\/+|\/+$/g,''); this.order=order; this.equal=equal; }
     orderByChild(child) { return new Ref(this.path, child, this.equal); }
@@ -320,13 +349,12 @@
     async set(value) { await this.write(value); }
     async update(values) {
       if (!this.path) {
+        if (!rootCache) await loadRoot();
         await batchUpdate(values);
-        // A root update may contain hundreds of score rows. Refresh the
-        // read cache and notify listeners once, after every write completes,
-        // instead of reloading the entire dataset after each row.
-        rootPromise = null;
-        await loadRoot(true);
-        listeners.slice().forEach(x => x.ref.once().then(s => x.handler(s)).catch(() => {}));
+        // The database acknowledgement is authoritative. Patch the local
+        // read cache only after the batch succeeds; a second full-root read
+        // would add latency and consume quota without improving correctness.
+        commitRootCache(values);
         return;
       }
       if (pathParts(this.path).length >= 2) {
@@ -336,7 +364,7 @@
       }
       for (const [key,value] of Object.entries(values||{})) await this.write(value, key);
     }
-    async write(value, child, refresh = true) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (value === null) await remove(name,key); else await persist(name,key,value); if (refresh) { rootPromise=null; await loadRoot(true); listeners.slice().forEach(x=>x.ref.once().then(s=>x.handler(s)).catch(()=>{})); } }
+    async write(value, child, refresh = true) { const parts=pathParts(this.path); const name=reverseTableMap[parts[0]] || parts[0]; const key=child ? pathParts(child)[0] : parts[1]; if (!name) return; if (!rootCache) await loadRoot(); if (value === null) await remove(name,key); else await persist(name,key,value); if (refresh) commitRootCache({ [`${parts[0]}/${key}`]: value }); }
     remove() { return this.set(null); }
   }
   const auth = { currentUser: null, Auth:{Persistence:{LOCAL:'local'}}, setPersistence:()=>Promise.resolve(), onAuthStateChanged(cb){ let active=true; let unsubscribe=()=>{ active=false; }; (async()=>{ try { await callbackReady; } catch (error) { console.error('SUPABASE_CALLBACK_SESSION_FAILED', error); } const {data,error}=await client.auth.getSession(); if (error) console.error('SUPABASE_GET_SESSION_FAILED', error); auth.currentUser=data?.session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (!active) return; setTimeout(()=>{ if (active) cb(auth.currentUser); },0); const {data:sub}=client.auth.onAuthStateChange((_event,session)=>{auth.currentUser=session?.user||null; if (auth.currentUser) window.__SUPABASE_SESSION_READY__ = true; if (active) cb(auth.currentUser); }); unsubscribe=()=>{ active=false; sub.subscription.unsubscribe(); }; })(); return ()=>unsubscribe(); }, async signInAnonymously(){ throw new Error('Supabase anonymous auth is disabled'); }, async signInWithPopup(){ const {data,error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}}); if(error) throw error; return {user:auth.currentUser,data}; }, async signOut(){ const {error}=await client.auth.signOut(); if(error) throw error; auth.currentUser=null; window.__SUPABASE_SESSION_READY__ = false; } };
