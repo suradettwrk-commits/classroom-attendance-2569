@@ -860,13 +860,14 @@ window.supabaseConfig = {
     await ready();
     const terms = (await readTerms()).val() || {};
     const selected = activeTerm({ terms }, requestedTerm);
-    const [students, assignments, teacherClasses, attendance] = await Promise.all([
+    const [students, assignments, teacherClasses, attendance, scores] = await Promise.all([
       readTermScoped('students', selected, { terms }),
       readTermScoped('assignments', selected, { terms }),
       db.ref('/teacherClasses').once('value').then((snapshot) => snapshot.val() || {}),
-      Promise.all(termQueryValues({ terms }, selected, 'attendance').map((value) => db.ref('/attendance').orderByChild('Term').equalTo(value).once('value'))).then((snapshots) => Object.assign({}, ...snapshots.map((snapshot) => snapshot.val() || {})))
-    ]);
-    return { students, assignments, terms, teacherClasses, attendance };
+      Promise.all(termQueryValues({ terms }, selected, 'attendance').map((value) => db.ref('/attendance').orderByChild('Term').equalTo(value).once('value'))).then((snapshots) => Object.assign({}, ...snapshots.map((snapshot) => snapshot.val() || {}))),
+      readTermScoped('scores', selected, { terms })
+      ]);
+    return { students, assignments, terms, teacherClasses, attendance, scores };
   }
   // Bootstrap is used for menus and class context only. Attendance and scores
   // are intentionally excluded; those large collections are loaded lazily by
