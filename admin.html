@@ -3846,22 +3846,23 @@
             let levelStr = state.filter.level.replace(/^(ม\.|M\.|m\.|Grade\s?)/, ''); 
             if(document.getElementById('print-doc-subtitle')) document.getElementById('print-doc-subtitle').innerText = `วิชา: ${subName} | ภาคเรียนที่ ${term} | ชั้นมัธยมศึกษาปีที่ ${levelStr}/${state.filter.room}`;
             
-            let html = `<table><thead><tr><th style="width: 30px;">#</th><th style="width: 70px;">รหัส</th><th style="text-align:left; padding-left:8px;">ชื่อ - นามสกุล</th>`;
+            let html = `<table style="table-layout:fixed;"><thead><tr><th style="width: 30px;">#</th><th style="width: 70px;">รหัส</th><th style="width: 190px; text-align:left; padding-left:8px;">ชื่อ - นามสกุล</th>`;
             let legendItems = [];
             state.assignments.forEach(asn => { 
                 const parts = asn.title.split(':::');
                 const shortTitle = parts[0];
                 const fullDesc = parts.length > 1 ? parts[1] : shortTitle;
-                
+                const compactTitle = shortTitle.length > 13 ? `${shortTitle.slice(0, 12)}…` : shortTitle;
+
                 legendItems.push(`<li><strong>${shortTitle}</strong> : ${fullDesc}</li>`);
-                html += `<th>${shortTitle}${isExportScoreHidden(asn) ? '<br><span style="font-size:9px; color:#0369a1;">ซ่อนคะแนน</span>' : ''}<br><span style="font-size:9px; color:#64748b;">(${asn.maxScore})</span></th>`;
+                html += `<th style="width:70px; max-width:70px;">${compactTitle}${isExportScoreHidden(asn) ? '<br><span style="font-size:9px; color:#0369a1;">ซ่อนคะแนน</span>' : ''}<br><span style="font-size:9px; color:#64748b;">(${asn.maxScore})</span></th>`;
             });
             html += `</tr></thead><tbody>`;
             state.students.forEach(std => {
                 const inactive = isStudentInactive(std);
                 const statusLabel = studentStatusLabel(std);
                 const rowStyle = inactive ? ' style="background:#e2e8f0; color:#475569;"' : '';
-                const nameSuffix = inactive ? ` <span style="display:inline-block; padding:2px 6px; border-radius:999px; font-size:9px; font-weight:700; background:#cbd5e1; color:#475569;">🔒 ${statusLabel}</span>` : '';
+                const nameSuffix = inactive ? `<span style="display:block; margin-top:2px; font-size:8px; line-height:1.1; font-weight:700; color:#64748b;">🔒 ${statusLabel}</span>` : '';
                 const baseCellStyle = inactive ? 'background:#e2e8f0; color:#475569;' : '';
                 html += `<tr${rowStyle}><td style="${baseCellStyle} text-align:center;">${std.no}</td><td style="${baseCellStyle} text-align:center;">${std.id}</td><td style="${baseCellStyle}">${std.prefix}${std.first} ${std.last}${nameSuffix}</td>`;
                 state.assignments.forEach(asn => {
@@ -3875,13 +3876,13 @@
             });
             html += `</tbody></table>`;
 
-            html += `<div style="margin-top:10px; font-size:10px; color:#64748b; -webkit-print-color-adjust:exact; print-color-adjust:exact;"><span style="display:inline-block; background:#fee2e2; color:#b91c1c; padding:2px 6px; margin-right:6px;">ว่าง/0 หรือไม่ติ๊ก</span><span style="display:inline-block; background:#fef3c7; color:#a16207; padding:2px 6px; margin-right:6px;">ต่ำกว่า 50%</span><span style="display:inline-block; background:#dcfce7; color:#166534; padding:2px 6px;">ตั้งแต่ 50% หรือ ติ๊กแล้ว</span>${state.assignments.some(isExportScoreHidden) ? '<span style="display:inline-block; background:#e0f2fe; color:#0369a1; padding:2px 6px; margin-left:6px;">ซ่อนคะแนน: ✓ = มีคะแนน, – = ยังไม่มีคะแนน</span>' : ''}</div>`;
+            html += `<div style="margin-top:8px; font-size:8px; line-height:1.35; text-align:left; color:#64748b; -webkit-print-color-adjust:exact; print-color-adjust:exact;"><span style="display:block; width:max-content; background:#fee2e2; color:#b91c1c; padding:1px 4px; margin-bottom:2px;">ว่าง/0 หรือไม่ติ๊ก</span><span style="display:block; width:max-content; background:#fef3c7; color:#a16207; padding:1px 4px; margin-bottom:2px;">ต่ำกว่า 50%</span><span style="display:block; width:max-content; background:#dcfce7; color:#166534; padding:1px 4px;">ตั้งแต่ 50% หรือ ติ๊กแล้ว</span>${state.assignments.some(isExportScoreHidden) ? '<span style="display:block; width:max-content; background:#e0f2fe; color:#0369a1; padding:1px 4px; margin-top:2px;">ซ่อนคะแนน: ✓ = มีคะแนน, – = ยังไม่มีคะแนน</span>' : ''}</div>`;
             
             if (legendItems.length > 0) {
-                html += `<div style="margin-top:20px; padding:10px; border:1px dashed #cbd5e1; border-radius:8px; page-break-inside:avoid;">
-                    <h4 style="font-size:12px; font-weight:bold; color:#4e73df; margin:0 0 5px 0;">หมายเหตุ / คำอธิบายรายวิชา</h4>
-                    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-wrap:wrap; gap:10px;">
-                        ${legendItems.map(item => `<li style="font-size:10px; color:#64748b; width:48%;">${item}</li>`).join('')}
+                html += `<div style="margin-top:12px; padding:7px 9px; border:1px dashed #cbd5e1; border-radius:8px; page-break-inside:avoid; text-align:left;">
+                    <h4 style="font-size:9px; font-weight:bold; color:#4e73df; margin:0 0 3px 0; text-align:left;">หมายเหตุ / คำอธิบายรายวิชา</h4>
+                    <ul style="list-style:none; padding:0; margin:0; text-align:left;">
+                        ${legendItems.map(item => `<li style="font-size:8px; line-height:1.35; color:#64748b; margin-bottom:2px; text-align:left;">${item}</li>`).join('')}
                     </ul>
                 </div>`;
             }
@@ -3938,7 +3939,7 @@
             const badgeWidth = 178, badgeHeight = 52, badgeX = imageWidth - margin - badgeWidth, badgeY = 8;
             ctx.fillStyle = '#1d4ed8'; ctx.beginPath(); ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 10); ctx.fill();
             ctx.fillStyle = '#ffffff'; ctx.font = `bold 25px ${thaiFont}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(roomLabel, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-            const headers = ['#', 'รหัส', 'ชื่อ - นามสกุล', ...assignments.map(asn => `${String(asn.title || '').split(':::')[0]}${isExportScoreHidden(asn) ? ' [ซ่อน]' : ''} (${asn.maxScore})`)];
+            const headers = ['#', 'รหัส', 'ชื่อ - นามสกุล', ...assignments.map(asn => { const title = String(asn.title || '').split(':::')[0]; const compact = title.length > 13 ? title.slice(0, 12) + '…' : title; return compact + (isExportScoreHidden(asn) ? ' [ซ่อน]' : '') + ` (${asn.maxScore})`; })];
             const widths = [noWidth, idWidth, nameWidth, ...assignments.map(() => scoreWidth)];
             let x = margin, y = 112;
             headers.forEach((header, index) => { cell(x, y, widths[index], 46, '#eef2ff'); textFit(header, x + widths[index] / 2, y + 23, widths[index] - 8, `bold 14px ${thaiFont}`, '#1e40af', 'center'); x += widths[index]; });
@@ -3946,9 +3947,9 @@
                 y = 158 + rowIndex * 40; x = margin;
                 const inactive = isStudentInactive(student);
                 const statusLabel = studentStatusLabel(student);
-                const name = `${student.prefix || ''}${student.first || ''} ${student.last || ''}${inactive ? `  🔒 ${statusLabel}` : ''}`;
+                const name = String(student.prefix || '') + String(student.first || '') + ' ' + String(student.last || '');
                 const base = [student.no, student.id, name];
-                base.forEach((value, index) => { cell(x, y, widths[index], 40, inactive ? '#e2e8f0' : (rowIndex % 2 ? '#f8fafc' : '#ffffff')); textFit(value, index === 2 ? x + 8 : x + widths[index] / 2, y + 20, widths[index] - 12, index === 2 ? `bold 16px ${thaiFont}` : `14px ${thaiFont}`, inactive ? '#475569' : '#0f172a', index === 2 ? 'left' : 'center'); x += widths[index]; });
+                base.forEach((value, index) => { cell(x, y, widths[index], 40, inactive ? '#e2e8f0' : (rowIndex % 2 ? '#f8fafc' : '#ffffff')); if (index === 2 && inactive) { textFit(value, x + 8, y + 13, widths[index] - 12, `bold 15px ${thaiFont}`, '#475569', 'left'); textFit('🔒 ' + statusLabel, x + 8, y + 30, widths[index] - 12, `10px ${thaiFont}`, '#64748b', 'left'); } else { textFit(value, index === 2 ? x + 8 : x + widths[index] / 2, y + 20, widths[index] - 12, index === 2 ? `bold 16px ${thaiFont}` : `14px ${thaiFont}`, inactive ? '#475569' : '#0f172a', index === 2 ? 'left' : 'center'); } x += widths[index]; });
                 assignments.forEach(asn => {
                     const raw = state.scores[`${asn.id}_${student.id}`];
                     const presentation = getExportScorePresentation(asn, raw);
