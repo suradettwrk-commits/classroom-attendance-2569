@@ -10462,14 +10462,21 @@ var DATA_CONTROLLER = new DataController();
         }
 
         // --- A) Helper Functions (Session Isolation) ---
+
+        function profileImageCacheKey(userId) {
+            return `${SESSION_KEY}_profile_image_${String(userId || 'unknown')}`;
+        }
         
         function saveSession(userObj) {
             if (!userObj) return;
             const sessionUser = { ...userObj };
-            // Keep a reasonably sized profile image across a hard reload. A
-            // missing image from the auth/profile refresh must not erase the
-            // image that was already available in the verified session.
-            if (typeof sessionUser.imageUrl === 'string' && sessionUser.imageUrl.startsWith('data:image/') && sessionUser.imageUrl.length > 400000) delete sessionUser.imageUrl;
+            const imageUrl = typeof sessionUser.imageUrl === 'string' ? sessionUser.imageUrl : '';
+            if (imageUrl.startsWith('data:image/')) {
+                try { localStorage.setItem(profileImageCacheKey(sessionUser.id), imageUrl); } catch (e) {}
+                // Keep large image data out of the auth session payload; the
+                // dedicated cache is restored by loadSession after reload.
+                delete sessionUser.imageUrl;
+            }
             delete sessionUser.password;
             delete sessionUser.authUser;
             try {
@@ -10486,7 +10493,10 @@ var DATA_CONTROLLER = new DataController();
             try {
                 // อ่านจาก sessionStorage เท่านั้น
                 const data = sessionStorage.getItem(SESSION_KEY);
-                return data ? JSON.parse(data) : null;
+                if (!data) return null;
+                const user = JSON.parse(data);
+                if (user && !user.imageUrl) user.imageUrl = localStorage.getItem(profileImageCacheKey(user.id)) || '';
+                return user;
             } catch (e) {
                 console.error("Session Parse Error", e);
                 return null;
@@ -10495,6 +10505,10 @@ var DATA_CONTROLLER = new DataController();
 
         function clearSession() {
             // ล้างทั้งสองที่เพื่อให้มั่นใจว่าสะอาด
+            try {
+                const user = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+                if (user && user.id) localStorage.removeItem(profileImageCacheKey(user.id));
+            } catch (e) {}
             sessionStorage.removeItem(SESSION_KEY);
             localStorage.removeItem(SESSION_KEY);
         }
