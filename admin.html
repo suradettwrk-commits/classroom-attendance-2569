@@ -1491,14 +1491,6 @@
             }
 
             if (type === 'SCORE') {
-                const records = Array.isArray(payload.records) ? payload.records : [];
-                const chunkSize = 40;
-                if (records.length > chunkSize) {
-                    for (let start = 0; start < records.length; start += chunkSize) {
-                        this.enqueue('SCORE', { ...payload, records: records.slice(start, start + chunkSize) });
-                    }
-                    return;
-                }
                 const targetTask = this.queue.find((t, index) => {
                     if (this.isSyncing && t.id === this.activeTaskId) return false;
                     return t.type === 'SCORE' && this.scoreScopeKey(t.payload) === this.scoreScopeKey(payload);
@@ -6004,7 +5996,7 @@
                 getEl('dash-term-summary-table').innerHTML = html;
             } else {
                 const chart = getEl('dash-term-summary-chart');
-                if (chart) chart.innerHTML = '<div class="text-xs font-bold text-slate-500 mb-2">ห้องที่มีอัตราการมาเรียนสูงสุด (10 อันดับ)</div><p class="text-sm text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในวันที่นี้</p>';
+                if (chart) chart.innerHTML = '<div class="text-xs font-bold text-slate-500 mb-2">ห้องที่มีอัตราการมาเรียนสูงสุด (10 อันดับ)</div><p class="text-sm text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในเทอมนี้</p>';
                 getEl('dash-term-summary-table').innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-400"><i class="fa-solid fa-folder-open text-2xl mb-2 block"></i> ยังไม่มีข้อมูลสำหรับเทอมนี้</td></tr>';
             }
         }
@@ -7603,7 +7595,7 @@
             grading.dirty = {}; grading.settingsDirty = false;
             gradingSetStatus(`บันทึก${auto ? 'อัตโนมัติ' : ''}สำเร็จ ${res.saved || 0} รายการ`, 'success');
             loadNativeGradingData();
-        }).withFailureHandler(err => fail(String(err))).saveGradingBatch({ ...filter, ...settingsAtStart, records, baseRecords: JSON.parse(JSON.stringify(grading.base || {})) });
+        }).withFailureHandler(err => { const normalized = typeof window.normalizeWriteError === 'function' ? window.normalizeWriteError(err) : { message: err && err.message ? err.message : String(err), retryable: true }; fail(normalized.message, normalized.retryable); }).saveGradingBatch({ ...filter, ...settingsAtStart, records, baseRecords: JSON.parse(JSON.stringify(grading.base || {})) });
     }
     function printNativeGrading() {
         const data = window.NATIVE_GRADING.data;

@@ -265,12 +265,12 @@
     return { success: true, data: { term: requestedTerm, subject: text(context.subjectCode || context.subject), subjectCode: text(context.subjectCode || context.subject), level: text(context.level), room: text(context.room), students, assignments, scores, orphanScores: [] } };
   };
   function pathParts(path) { return String(path || '').split('/').filter(Boolean); }
-  async function persist(name, key, value) {
+  function payloadFor(name, key, value) {
     const table = tableName(name);
     if (name === 'settings' || name === 'systemSettings') {
       const settingKey = key || text(value && (value.Key || value.key));
       const payload = { setting_key: settingKey, term_id: value && (value.TermID || value.term_id || null), value: value && (value.Value ?? value.value ?? value), updated_at: new Date().toISOString() };
-      const { error } = await client.from('settings').upsert(payload); if (error) throw error; return;
+      return { table: 'settings', idCol: 'setting_key', payload };
     }
     const columns = { terms: 'term_id', students: 'student_id', subjects: 'subject_code', teacherClasses: 'teacher_class_id', assignments: 'assignment_id', attendance: 'record_id', scores: 'score_id', users: 'user_id', authProfiles: 'id' };
     const idCol = columns[name];
@@ -286,11 +286,29 @@
     if (name === 'scores') { p.score_id=key; set('term_id',['TermID','termId','term_id','Term']); set('assignment_id',['AssignmentID','assignmentId','assignment_id']); set('student_id',['StudentID','studentId','student_id']); set('subject_code',['SubjectCode','subjectCode','subject_code']); set('score',['Score','score']); set('is_submitted',['IsSubmitted','isSubmitted','is_submitted']); }
     if (name === 'users') { p.user_id=key; set('username',['Username','username']); set('email',['Email','email']); set('role',['Role','role']); set('status',['Status','status']); }
     if (p.term_id && name !== 'terms') p.term_id = canonicalTermId(p.term_id);
-    // Let PostgREST use the table's declared primary key. Several migrated
-    // tables intentionally use composite (term_id, legacy_id) keys.
-    const { error } = await client.from(table).upsert(p); if (error) throw error;
+    return { table, idCol, payload: p };
   }
+  async function persist(name, key, value) { const item = payloadFor(name, key, value); const { error } = await client.from(item.table).upsert(item.payload); if (error) throw error; }
   async function remove(name, key) { const idCol = { terms:'term_id',students:'student_id',subjects:'subject_code',teacherClasses:'teacher_class_id',assignments:'assignment_id',attendance:'record_id',scores:'score_id',users:'user_id',authProfiles:'id' }[name]; if (!idCol) throw new Error(`ไม่รองรับการลบตาราง ${name}`); const { error } = await client.from(tableName(name)).delete().eq(idCol,key); if (error) throw error; }
+  async function batchUpdate(values) {
+    const grouped = new Map();
+    for (const [path, value] of Object.entries(values || {})) {
+      const parts = pathParts(path); if (parts.length < 2) continue;
+      const name = reverseTableMap[parts[0]] || parts[0], key = parts[1];
+      const group = grouped.get(name) || { upserts: [], deletes: [], item: null };
+      if (value === null) group.deletes.push(key);
+      else { const item = payloadFor(name, key, value); group.item = item; group.upserts.push(item.payload); }
+      grouped.set(name, group);
+    }
+    for (const [name, group] of grouped) {
+      if (group.upserts.length) { const { error } = await client.from(group.item.table).upsert(group.upserts); if (error) throw error; }
+      if (group.deletes.length) {
+        const idCol = ({ terms:'term_id',students:'student_id',subjects:'subject_code',teacherClasses:'teacher_class_id',assignments:'assignment_id',attendance:'record_id',scores:'score_id',users:'user_id',authProfiles:'id' })[name];
+        if (!idCol) throw new Error(`ไม่รองรับการลบตาราง ${name}`);
+        const { error } = await client.from(tableName(name)).delete().in(idCol, group.deletes); if (error) throw error;
+      }
+    }
+  }
   class Ref {
     constructor(path, order, equal) { this.path=String(path||'').replace(/^\/+|\/+$/g,''); this.order=order; this.equal=equal; }
     orderByChild(child) { return new Ref(this.path, child, this.equal); }
@@ -302,10 +320,7 @@
     async set(value) { await this.write(value); }
     async update(values) {
       if (!this.path) {
-        for (const [path, value] of Object.entries(values || {})) {
-          const parts = pathParts(path);
-          if (parts.length >= 2) await new Ref(parts[0]).write(value, parts[1], false);
-        }
+        await batchUpdate(values);
         // A root update may contain hundreds of score rows. Refresh the
         // read cache and notify listeners once, after every write completes,
         // instead of reloading the entire dataset after each row.

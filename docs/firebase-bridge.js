@@ -873,6 +873,19 @@
     return out;
   }
 
+  function normalizeWriteError(error) {
+    const source = error && typeof error === 'object' ? error : { message: error };
+    const fields = ['message', 'error_description', 'details', 'hint', 'code'];
+    const parts = fields.map((key) => source[key]).filter((value) => value !== undefined && value !== null && String(value).trim()).map(String);
+    const lower = parts.join(' ').toLowerCase();
+    const kind = lower.includes('rls') || lower.includes('permission') || lower.includes('row-level') || lower.includes('42501') ? 'permission'
+      : lower.includes('conflict') || lower.includes('409') ? 'conflict'
+      : lower.includes('timeout') || lower.includes('statement timeout') ? 'timeout'
+      : lower.includes('network') || lower.includes('fetch') || lower.includes('offline') ? 'network' : 'unknown';
+    return { message: parts.join(' — ') || 'บันทึกไม่สำเร็จ', kind, retryable: kind === 'timeout' || kind === 'network' };
+  }
+  window.normalizeWriteError = normalizeWriteError;
+
   function gradeKey(term, subjectCode, studentId, component) {
     return ['GRADE', text(term), text(subjectCode), text(studentId), text(component)].join('|').replace(/[.#$\[\]/]/g, '_');
   }
@@ -1290,6 +1303,10 @@
         const studentId = text(record && (record.studentId || record.StudentID || record.id));
         if (!studentId) throw new Error('ไม่พบรหัสนักเรียนในข้อมูลเช็คชื่อ');
         const rawId = text(record.recordId || record.RecordID || `${date}_${studentId}_${subjectCode}`);
+        if (!text(record && (record.status !== undefined ? record.status : record.Status))) {
+          updates[`attendance/${firebaseKey(rawId)}`] = null;
+          return;
+        }
         updates[`attendance/${firebaseKey(rawId)}`] = withoutUndefined({
           RecordID: rawId, TeacherClassID: scopeId, ClassID: classId || undefined, TermID: canonicalTermId(term, root), Date: date, SubjectCode: subjectCode, Level: level, Room: room, Term: term, StudentID: studentId,
           Status: Object.prototype.hasOwnProperty.call(record || {}, 'status') || Object.prototype.hasOwnProperty.call(record || {}, 'Status')
@@ -1300,6 +1317,22 @@
       });
       await db.ref('/').update(updates); snapshotPromise = null;
       return { success: true, saved: Object.keys(updates).length, message: 'บันทึกการเช็คชื่อสำเร็จ' };
+    }
+    if (name === 'clearAttendanceForClass') {
+      const authz = await teacherOrAdmin(arg);
+      const date = text(arg.date), subjectCode = text(arg.subjectCode || arg.subject), level = text(arg.level), room = text(arg.room), term = text(arg.term);
+      const root = await data();
+      const scope = authz.admin ? null : findTeacherClass(root, authz.teacherId, subjectCode, level, room, term);
+      if (!authz.admin && !scope) throw new Error('ครูไม่มีสิทธิ์ล้างข้อมูลเช็คชื่อของวิชา ชั้น ห้อง หรือเทอมนี้');
+      const ids = new Set((arg.studentIds || []).map(text).filter(Boolean));
+      const updates = {};
+      Object.entries(rawMap(root.attendance)).forEach(([key, row]) => {
+        const matches = text(row.Date || row.date).slice(0, 10) === date && text(row.SubjectCode || row.subjectCode) === subjectCode && text(row.Level || row.level) === level && text(row.Room || row.room) === room && matchesTerm(row.TermID || row.Term || row.term, term, root) && (!ids.size || ids.has(text(row.StudentID || row.studentId)));
+        if (matches) updates[`attendance/${firebaseKey(key)}`] = null;
+      });
+      if (Object.keys(updates).length) await db.ref('/').update(updates);
+      snapshotPromise = null;
+      return { success: true, deleted: Object.keys(updates).length, message: 'ล้างข้อมูลเช็คชื่อสำเร็จ' };
     }
     if (name === 'saveScoresBatch') {
       const authz = await teacherOrAdmin(arg);
@@ -1640,6 +1673,7 @@
     getDashboardStats: (args) => window.classroomRepository.getDashboard(args[0] || {}),
     getInitialDropdowns: (args) => window.classroomRepository.getAllowedScopes({ termId: window.CURRENT_SERVER_TERM, user: args[0] }),
     saveAttendance: (args) => window.classroomRepository.saveAttendance(args[0] || {}),
+    clearAttendanceForClass: (args) => repositoryWrite('clearAttendanceForClass', repositoryContext(args[0] || {})),
     saveScoresBatch: (args) => window.classroomRepository.saveScores(args[0] || {}),
     saveGradingBatch: (args) => window.classroomRepository.saveGrades(args[0] || {})
   };
