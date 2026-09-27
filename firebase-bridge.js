@@ -1204,7 +1204,21 @@
       attendanceRows.forEach((r) => { const studentRow = byId[text(r.StudentID)]; if (!studentRow) return; const key = `${text(studentRow.Level)}|${text(studentRow.Room)}`; const c = classMap[key]; if (!c) return; const s = status(r.Status); if (['present', 'มา', 'มาเรียน'].includes(s)) c.present++; else if (['late', 'สาย'].includes(s)) c.late++; else if (['leave', 'ลา'].includes(s)) c.leave++; else if (['absent', 'ขาด'].includes(s)) c.absent++; });
       const classSummary = Object.values(classMap).sort(classSort).map((c) => ({ ...c, attendanceRate: (c.present + c.late + c.leave + c.absent) ? Math.round((c.present + c.late) / (c.present + c.late + c.leave + c.absent) * 100) : 0 }));
       const termSummary = classSummary.reduce((a, c) => { ['present', 'late', 'leave', 'absent'].forEach(k => a[k] += c[k]); return a; }, { present: 0, late: 0, leave: 0, absent: 0 });
-      return { success: true, totalStudents: students.length, presentToday: present, totalAssignments: assignments.length, riskStudents: Object.values(absentByStudent).filter((n) => n > 3).length, stats: { present, late, leave, absent }, riskList, classSummary, termSummary };
+      const applicableAssignments = assignments.filter((assignment) => students.some((studentRow) => text(studentRow.Level) === text(assignment.Level) && text(studentRow.Room) === text(assignment.Room)));
+      const applicableAssignmentIds = new Set(applicableAssignments.map((row) => text(row.AssignmentID)).filter(Boolean));
+      const scoreRows = values('scores', root).filter((row) => matchesTerm(recordTerm(row), selected, root) && studentIds.has(text(row.StudentID)) && applicableAssignmentIds.has(text(row.AssignmentID)));
+      const scoredRows = scoreRows.filter((row) => row.Score !== undefined && row.Score !== null && text(row.Score) !== '' && Number.isFinite(Number(row.Score)));
+      const expectedScoreEntries = applicableAssignments.reduce((total, assignment) => total + students.filter((studentRow) => text(studentRow.Level) === text(assignment.Level) && text(studentRow.Room) === text(assignment.Room)).length, 0);
+      const scoreDataAvailable = scoredRows.length > 0;
+      const scoreAverage = scoreDataAvailable ? Math.round(scoredRows.reduce((total, row) => total + Number(row.Score), 0) / scoredRows.length * 10) / 10 : null;
+      const scoredAssignmentIds = new Set(scoredRows.map((row) => text(row.AssignmentID)).filter(Boolean));
+      const pendingScoreStudents = students.filter((studentRow) => {
+        const studentAssignments = applicableAssignments.filter((assignment) => text(assignment.Level) === text(studentRow.Level) && text(assignment.Room) === text(studentRow.Room));
+        if (!studentAssignments.length) return false;
+        const studentScoreIds = new Set(scoreRows.filter((row) => text(row.StudentID) === text(studentRow.StudentID) && row.Score !== undefined && row.Score !== null && text(row.Score) !== '').map((row) => text(row.AssignmentID)));
+        return studentAssignments.some((assignment) => !studentScoreIds.has(text(assignment.AssignmentID)));
+      }).length;
+      return { success: true, totalStudents: students.length, presentToday: dayRows.length ? present : null, hasAttendanceData: dayRows.length > 0, hasAttendanceHistory: attendanceRows.length > 0, totalAssignments: assignments.length, riskStudents: attendanceRows.length ? Object.values(absentByStudent).filter((n) => n > 3).length : null, stats: { present, late, leave, absent }, riskList, classSummary, termSummary, scoreDataAvailable, assignmentProgress: expectedScoreEntries ? Math.round(scoredRows.length / expectedScoreEntries * 100) : null, scoreAverage, gradedAssignments: scoredAssignmentIds.size, applicableAssignments: applicableAssignments.length, pendingScoreStudents };
     }
     if (name === 'loadScoresGrid') {
       const selected = activeTerm(root, arg.term);

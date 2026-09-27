@@ -1662,7 +1662,21 @@ window.supabaseConfig = {
       attendanceRows.forEach((r) => { const studentRow = byId[text(r.StudentID)]; if (!studentRow) return; const key = `${text(studentRow.Level)}|${text(studentRow.Room)}`; const c = classMap[key]; if (!c) return; const s = status(r.Status); if (['present', 'มา', 'มาเรียน'].includes(s)) c.present++; else if (['late', 'สาย'].includes(s)) c.late++; else if (['leave', 'ลา'].includes(s)) c.leave++; else if (['absent', 'ขาด'].includes(s)) c.absent++; });
       const classSummary = Object.values(classMap).sort(classSort).map((c) => ({ ...c, attendanceRate: (c.present + c.late + c.leave + c.absent) ? Math.round((c.present + c.late) / (c.present + c.late + c.leave + c.absent) * 100) : 0 }));
       const termSummary = classSummary.reduce((a, c) => { ['present', 'late', 'leave', 'absent'].forEach(k => a[k] += c[k]); return a; }, { present: 0, late: 0, leave: 0, absent: 0 });
-      return { success: true, totalStudents: students.length, presentToday: present, totalAssignments: assignments.length, riskStudents: Object.values(absentByStudent).filter((n) => n > 3).length, stats: { present, late, leave, absent }, riskList, classSummary, termSummary };
+      const applicableAssignments = assignments.filter((assignment) => students.some((studentRow) => text(studentRow.Level) === text(assignment.Level) && text(studentRow.Room) === text(assignment.Room)));
+      const applicableAssignmentIds = new Set(applicableAssignments.map((row) => text(row.AssignmentID)).filter(Boolean));
+      const scoreRows = values('scores', root).filter((row) => matchesTerm(recordTerm(row), selected, root) && studentIds.has(text(row.StudentID)) && applicableAssignmentIds.has(text(row.AssignmentID)));
+      const scoredRows = scoreRows.filter((row) => row.Score !== undefined && row.Score !== null && text(row.Score) !== '' && Number.isFinite(Number(row.Score)));
+      const expectedScoreEntries = applicableAssignments.reduce((total, assignment) => total + students.filter((studentRow) => text(studentRow.Level) === text(assignment.Level) && text(studentRow.Room) === text(assignment.Room)).length, 0);
+      const scoreDataAvailable = scoredRows.length > 0;
+      const scoreAverage = scoreDataAvailable ? Math.round(scoredRows.reduce((total, row) => total + Number(row.Score), 0) / scoredRows.length * 10) / 10 : null;
+      const scoredAssignmentIds = new Set(scoredRows.map((row) => text(row.AssignmentID)).filter(Boolean));
+      const pendingScoreStudents = students.filter((studentRow) => {
+        const studentAssignments = applicableAssignments.filter((assignment) => text(assignment.Level) === text(studentRow.Level) && text(assignment.Room) === text(studentRow.Room));
+        if (!studentAssignments.length) return false;
+        const studentScoreIds = new Set(scoreRows.filter((row) => text(row.StudentID) === text(studentRow.StudentID) && row.Score !== undefined && row.Score !== null && text(row.Score) !== '').map((row) => text(row.AssignmentID)));
+        return studentAssignments.some((assignment) => !studentScoreIds.has(text(assignment.AssignmentID)));
+      }).length;
+      return { success: true, totalStudents: students.length, presentToday: dayRows.length ? present : null, hasAttendanceData: dayRows.length > 0, hasAttendanceHistory: attendanceRows.length > 0, totalAssignments: assignments.length, riskStudents: attendanceRows.length ? Object.values(absentByStudent).filter((n) => n > 3).length : null, stats: { present, late, leave, absent }, riskList, classSummary, termSummary, scoreDataAvailable, assignmentProgress: expectedScoreEntries ? Math.round(scoredRows.length / expectedScoreEntries * 100) : null, scoreAverage, gradedAssignments: scoredAssignmentIds.size, applicableAssignments: applicableAssignments.length, pendingScoreStudents };
     }
     if (name === 'loadScoresGrid') {
       const selected = activeTerm(root, arg.term);
@@ -3166,12 +3180,14 @@ var DATA_CONTROLLER = new DataController();
                     <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-present-today">-</h3>
                 </div>
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                    <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">งานที่มอบหมาย</p>
-                    <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-total-assigns">-</h3>
+                    <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">ความคืบหน้าการส่งงาน</p>
+                    <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-assignment-progress">-</h3>
+                    <p class="text-xs text-slate-400 mt-1" id="dash-assignment-progress-detail">-</p>
                 </div>
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                    <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">ขาดเรียนบ่อย (>3)</p>
-                    <h3 class="text-3xl font-bold text-slate-800 mt-1 text-red-500" id="dash-risk-student">-</h3>
+                    <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">คะแนนเฉลี่ยห้อง</p>
+                    <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-score-average">-</h3>
+                    <p class="text-xs text-slate-400 mt-1" id="dash-score-average-detail">-</p>
                 </div>
             </div>
 
@@ -3191,11 +3207,12 @@ var DATA_CONTROLLER = new DataController();
                             </div>
                         </div>
                     </div>
+                    <div id="dash-score-summary" class="mt-5 pt-4 border-t border-slate-100"></div>
                 </div>
 
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                     <h3 class="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                        <i class="fa-solid fa-triangle-exclamation text-red-500"></i> กลุ่มเสี่ยง (Top 5)
+                        <i class="fa-solid fa-triangle-exclamation text-red-500"></i> นักเรียนที่ต้องติดตาม (Top 5)
                     </h3>
                     <div class="overflow-hidden">
                         <table class="w-full text-sm text-left">
@@ -4807,7 +4824,23 @@ var DATA_CONTROLLER = new DataController();
                 const classSummary = Object.values(classes).map(c => ({ ...c, attendanceRate: (c.present + c.late + c.leave + c.absent) ? Math.round((c.present + c.late) / (c.present + c.late + c.leave + c.absent) * 100) : 0 }));
                 const termSummary = classSummary.reduce((out, c) => { ['present', 'late', 'leave', 'absent'].forEach(k => out[k] += c[k]); return out; }, { present: 0, late: 0, leave: 0, absent: 0 });
                 const termAssignmentCount = data.meta && Number.isFinite(Number(data.meta.termAssignmentCount)) ? Number(data.meta.termAssignmentCount) : rows(data.assignments).length;
-                return { success: true, term: normalizeTermForUI(data.meta && data.meta.term) || window.CURRENT_SERVER_TERM || getCurrentTerm(), totalStudents: students.length, presentToday: present, totalAssignments: termAssignmentCount, riskStudents: Object.values(absentByStudent).filter(n => n > 3).length, stats: { present, late, leave, absent }, riskList, classSummary, termSummary };
+                const assignments = rows(data.assignments);
+                const assignmentId = assignment => String(field(assignment, ['id', 'assignmentId', 'AssignmentID', 'assignment_id']) || '').trim();
+                const applicableAssignments = assignments.filter(assignment => students.some(studentRow => levelOf(studentRow) === String(field(assignment, ['level', 'Level']) || '').trim() && roomOf(studentRow) === String(field(assignment, ['room', 'Room']) || '').trim()));
+                const applicableAssignmentIds = new Set(applicableAssignments.map(assignmentId).filter(Boolean));
+                const scoreRows = rows(data.scores).filter(row => studentIds.has(String(field(row, ['studentId', 'StudentID', 'student_id']) || '').trim()) && applicableAssignmentIds.has(String(field(row, ['assignmentId', 'AssignmentID', 'assignment_id']) || '').trim()));
+                const scoredRows = scoreRows.filter(row => field(row, ['score', 'Score']) !== '' && field(row, ['score', 'Score']) !== null && field(row, ['score', 'Score']) !== undefined && Number.isFinite(Number(field(row, ['score', 'Score']))));
+                const expectedScoreEntries = applicableAssignments.reduce((total, assignment) => total + students.filter(studentRow => levelOf(studentRow) === String(field(assignment, ['level', 'Level']) || '').trim() && roomOf(studentRow) === String(field(assignment, ['room', 'Room']) || '').trim()).length, 0);
+                const scoreDataAvailable = scoredRows.length > 0;
+                const scoreAverage = scoreDataAvailable ? Math.round(scoredRows.reduce((total, row) => total + Number(field(row, ['score', 'Score'])), 0) / scoredRows.length * 10) / 10 : null;
+                const scoredAssignmentIds = new Set(scoredRows.map(row => String(field(row, ['assignmentId', 'AssignmentID', 'assignment_id']) || '').trim()).filter(Boolean));
+                const pendingScoreStudents = students.filter(studentRow => {
+                    const studentAssignments = applicableAssignments.filter(assignment => levelOf(studentRow) === String(field(assignment, ['level', 'Level']) || '').trim() && roomOf(studentRow) === String(field(assignment, ['room', 'Room']) || '').trim());
+                    if (!studentAssignments.length) return false;
+                    const studentScoreIds = new Set(scoreRows.filter(row => String(field(row, ['studentId', 'StudentID', 'student_id']) || '').trim() === studentId(studentRow) && field(row, ['score', 'Score']) !== '' && field(row, ['score', 'Score']) !== null && field(row, ['score', 'Score']) !== undefined).map(row => String(field(row, ['assignmentId', 'AssignmentID', 'assignment_id']) || '').trim()));
+                    return studentAssignments.some(assignment => !studentScoreIds.has(assignmentId(assignment)));
+                }).length;
+                return { success: true, term: normalizeTermForUI(data.meta && data.meta.term) || window.CURRENT_SERVER_TERM || getCurrentTerm(), totalStudents: students.length, presentToday: dayRows.length ? present : null, hasAttendanceData: dayRows.length > 0, hasAttendanceHistory: attendance.length > 0, totalAssignments: termAssignmentCount, riskStudents: attendance.length ? Object.values(absentByStudent).filter(n => n > 3).length : null, stats: { present, late, leave, absent }, riskList, classSummary, termSummary, scoreDataAvailable, assignmentProgress: expectedScoreEntries ? Math.round(scoredRows.length / expectedScoreEntries * 100) : null, scoreAverage, gradedAssignments: scoredAssignmentIds.size, applicableAssignments: applicableAssignments.length, pendingScoreStudents };
             };
             window.__buildRealtimeDashboardStats = realtimeDashboard;
             window.addEventListener('firebase-realtime-update', (event) => {
@@ -8702,9 +8735,11 @@ var DATA_CONTROLLER = new DataController();
         const dashboardTerm = normalizeTermForUI(s.term || window.CURRENT_SERVER_TERM || getCurrentTerm());
         if (getEl('header-term')) getEl('header-term').innerText = dashboardTerm || 'ยังไม่ระบุเทอม';
         if(getEl('dash-total-student')) getEl('dash-total-student').innerText=s.totalStudents; 
-        if(getEl('dash-present-today')) getEl('dash-present-today').innerText=s.presentToday;
-        if(getEl('dash-total-assigns')) getEl('dash-total-assigns').innerText=s.totalAssignments;
-        if(getEl('dash-risk-student')) getEl('dash-risk-student').innerText=s.riskStudents;
+        if(getEl('dash-present-today')) getEl('dash-present-today').innerText=s.hasAttendanceData ? s.presentToday : 'ยังไม่เช็ค';
+        if(getEl('dash-assignment-progress')) getEl('dash-assignment-progress').innerText=s.scoreDataAvailable && s.assignmentProgress !== null ? `${s.assignmentProgress}%` : 'ยังไม่มีข้อมูล';
+        if(getEl('dash-assignment-progress-detail')) getEl('dash-assignment-progress-detail').innerText=s.scoreDataAvailable ? `${s.gradedAssignments || 0}/${s.applicableAssignments || 0} งานมีคะแนน` : 'ยังไม่มีคะแนนงาน';
+        if(getEl('dash-score-average')) getEl('dash-score-average').innerText=s.scoreDataAvailable && s.scoreAverage !== null ? `${s.scoreAverage}%` : 'ยังไม่มีข้อมูล';
+        if(getEl('dash-score-average-detail')) getEl('dash-score-average-detail').innerText=s.scoreDataAvailable ? `งานค้าง ${s.pendingScoreStudents || 0} คน` : 'ยังไม่มีคะแนนงาน';
         const scopeWarning = getEl('dash-teacher-scope-warning');
         if (scopeWarning) {
             if (s && s.teacherScopeMissing && CURRENT_USER && CURRENT_USER.role === 'teacher') scopeWarning.classList.remove('hidden');
@@ -8714,7 +8749,8 @@ var DATA_CONTROLLER = new DataController();
             const total = s.stats.present + s.stats.late + s.stats.leave + s.stats.absent;
             if (total > 0) { const pP = (s.stats.present/total)*100, pL = (s.stats.late/total)*100, pLe = (s.stats.leave/total)*100, pA = (s.stats.absent/total)*100; getEl('dash-chart-container').innerHTML = `<div class="flex h-6 w-full rounded-full overflow-hidden mb-2 bg-slate-100"><div class="bg-green-500 h-full" style="width: ${pP}%"></div><div class="bg-yellow-400 h-full" style="width: ${pL}%"></div><div class="bg-blue-400 h-full" style="width: ${pLe}%"></div><div class="bg-red-500 h-full" style="width: ${pA}%"></div></div><div class="flex flex-wrap gap-4 text-xs font-bold text-slate-600"><span class="flex items-center gap-1"><div class="w-3 h-3 bg-green-500 rounded-full"></div> มา (${s.stats.present})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-yellow-400 rounded-full"></div> สาย (${s.stats.late})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-blue-400 rounded-full"></div> ลา (${s.stats.leave})</span><span class="flex items-center gap-1"><div class="w-3 h-3 bg-red-500 rounded-full"></div> ขาด (${s.stats.absent})</span></div>`; } else { getEl('dash-chart-container').innerHTML = '<p class="text-sm text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในวันที่นี้</p>'; }
         }
-        if(getEl('dash-risk-table')) { const riskList = Array.isArray(s.riskList) ? s.riskList : []; if(riskList.length > 0) { getEl('dash-risk-table').innerHTML = riskList.map(r => `<tr><td class="p-3 text-slate-700 font-bold">${r.name}</td><td class="p-3 text-right text-red-600 font-mono font-bold">${r.absentCount || r.count || 0} ครั้ง</td><td class="p-3 text-center"><span class="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full">${r.status || 'เฝ้าระวัง'}</span></td></tr>`).join(''); } else { getEl('dash-risk-table').innerHTML = '<tr><td colspan="3" class="p-4 text-center text-green-500"><i class="fa-solid fa-check-circle mr-2"></i>ไม่มีนักเรียนกลุ่มเสี่ยง</td></tr>'; } }
+        if(getEl('dash-score-summary')) getEl('dash-score-summary').innerHTML = s.scoreDataAvailable ? `<div class="text-xs font-bold text-slate-500 mb-2">ภาพรวมงานและคะแนน</div><div class="grid grid-cols-2 gap-3 text-xs"><div class="bg-slate-50 rounded-lg p-3"><span class="text-slate-400">งานที่ตรวจแล้ว</span><strong class="block text-slate-700 mt-1">${s.gradedAssignments || 0}/${s.applicableAssignments || 0} งาน</strong></div><div class="bg-slate-50 rounded-lg p-3"><span class="text-slate-400">นักเรียนมีงานค้าง</span><strong class="block text-slate-700 mt-1">${s.pendingScoreStudents || 0} คน</strong></div></div>` : '<div class="text-xs text-slate-400">ยังไม่มีข้อมูลคะแนนงานสำหรับเทอมและขอบเขตนี้</div>';
+        if(getEl('dash-risk-table')) { const riskList = Array.isArray(s.riskList) ? s.riskList : []; if (s.hasAttendanceHistory && riskList.length > 0) { getEl('dash-risk-table').innerHTML = riskList.map(r => `<tr><td class="p-3 text-slate-700 font-bold">${r.name}</td><td class="p-3 text-right text-red-600 font-mono font-bold">${r.absentCount || r.count || 0} ครั้ง</td><td class="p-3 text-center"><span class="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full">${r.status || 'เฝ้าระวัง'}</span></td></tr>`).join(''); } else if (s.hasAttendanceHistory) { getEl('dash-risk-table').innerHTML = '<tr><td colspan="3" class="p-4 text-center text-green-500"><i class="fa-solid fa-check-circle mr-2"></i>ไม่มีนักเรียนที่ต้องติดตาม</td></tr>'; } else { getEl('dash-risk-table').innerHTML = '<tr><td colspan="3" class="p-4 text-center text-slate-400">ยังไม่มีข้อมูลเช็คชื่อในเทอมนี้</td></tr>'; } }
         
         if(getEl('dash-term-summary-table')) {
             const classSummary = Array.isArray(s.classSummary) ? s.classSummary : [];
