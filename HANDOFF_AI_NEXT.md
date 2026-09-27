@@ -4,14 +4,18 @@
 >
 > ให้อ่านส่วนนี้ก่อนทุกครั้ง ส่วนบันทึกด้านล่างเป็นประวัติการแก้ไขเดิมและอาจมีสถานะที่ล้าสมัย ห้ามย้อนกลับไปทำซ้ำหรือสรุปจากข้อความเก่าโดยไม่เทียบกับส่วนนี้
 >
-> **ผลลัพธ์ล่าสุด: RELEASED / DEPLOYED**
+> **ผลลัพธ์ล่าสุด: RELEASED / DEPLOYED / STABLE**
 >
 > - ฐาน release คือ `origin/main` ของ `https://github.com/suradettwrk-commits/classroom-attendance-2569.git`
-> - commit ล่าสุดที่ deploy คือ `4766347 fix: route supabase score grid through bounded read`
-> - push ไป `origin/main` สำเร็จแบบ fast-forward ปกติจาก `cd9d16a` เป็น `4766347`
+> - commit ล่าสุดที่ deploy คือ `c380c1c fix fast shared write paths and grading settings term`
+> - push ไป `origin/main` สำเร็จแบบ fast-forward ปกติจาก `1f5ad81` เป็น `c380c1c`
 > - ห้ามใช้ Force Push และห้ามนำ branch `main` ใน OneDrive ที่ประวัติแยกกันมาผสานทับ release โดยตรง
 > - GitHub Actions `Deploy GitHub Pages #59` ผ่าน และ `pages-build-deployment #73` ผ่าน
 > - Production URL: `https://suradettwrk-commits.github.io/classroom-attendance-2569/`
+> - รายงานสำรองฉบับนี้: `RELEASE_STATUS_REPORT_2026-09-27.md`
+> - สถานะใช้งาน: ระบบหลักอ่าน/เขียน/ซิงก์ได้จริงและนิ่งดีมากจากหลักฐานที่ตรวจแล้ว
+> - Scores ใช้ `SYNC_ENGINE`; Grading ใช้ pipeline แยกโดยตั้งใจ เพื่อคุม batch, conflict, retry และ settings `term_id` ไม่ให้ปะปนกัน
+> - ยังไม่ควรรวม queue สองส่วนจนกว่าจะมีคำสั่งใหม่และมี contract test รองรับ
 >
 > **ขอบเขตที่ยืนยันแล้ว**
 >
