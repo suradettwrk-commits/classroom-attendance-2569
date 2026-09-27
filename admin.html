@@ -5832,7 +5832,7 @@
             if (typeof saveSession === 'function') saveSession(CURRENT_USER);
             window.tempProfileImage = null;
             Swal.fire({ icon: 'success', title: 'อัปเดตโปรไฟล์เรียบร้อย', timer: 1500, showConfirmButton: false });
-        }).withFailureHandler(err=>{ btnLoading(btn, false); Swal.fire('Error', String(err), 'error'); }).saveUserProfile(payload, imgData);
+        }).withFailureHandler(err=>{ btnLoading(btn, false); const normalized = typeof window.normalizeWriteError === 'function' ? window.normalizeWriteError(err) : { message: err && err.message ? err.message : String(err) }; Swal.fire('Error', normalized.message, 'error'); }).saveUserProfile(payload, imgData);
     }
 
     function clearSystemCache(btn) {

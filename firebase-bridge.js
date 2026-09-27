@@ -878,7 +878,7 @@
     const fields = ['message', 'error_description', 'details', 'hint', 'code'];
     const parts = fields.map((key) => source[key]).filter((value) => value !== undefined && value !== null && String(value).trim()).map(String);
     const lower = parts.join(' ').toLowerCase();
-    const kind = lower.includes('rls') || lower.includes('permission') || lower.includes('row-level') || lower.includes('42501') ? 'permission'
+    const kind = lower.includes('rls') || lower.includes('permission') || lower.includes('row-level') || lower.includes('42501') || lower.includes('403') ? 'permission'
       : lower.includes('conflict') || lower.includes('409') ? 'conflict'
       : lower.includes('timeout') || lower.includes('statement timeout') ? 'timeout'
       : lower.includes('network') || lower.includes('fetch') || lower.includes('offline') ? 'network' : 'unknown';
