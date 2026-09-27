@@ -2152,6 +2152,7 @@ window.supabaseConfig = {
     const role = String(pick('Role', 'role') || '').toLowerCase();
     const status = String(pick('Status', 'status') || '').toLowerCase();
     if (match && ['admin', 'teacher', 'attendance_assistant'].includes(role) && status !== 'inactive') {
+      const profileImage = pick('ProfileImage', 'profileImage', 'profile_image', 'imageUrl', 'image_url') || authUser.user_metadata?.avatar_url || '';
       return { success: true, user: {
         id: pick('UserID', 'userId', 'user_id', 'id'),
         username: pick('Username', 'username') || email,
@@ -2162,7 +2163,7 @@ window.supabaseConfig = {
         school: pick('School', 'school') || '',
         group: pick('Group', 'group') || '',
         role, status: pick('Status', 'status') || 'Active', email,
-        imageUrl: authUser.user_metadata?.avatar_url || '', authUser
+        imageUrl: profileImage, authUser
       } };
     }
     return { success: true, needsSetup: true, uid: authUser.id, email, name: authUser.user_metadata?.full_name || email };
