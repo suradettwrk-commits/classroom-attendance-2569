@@ -113,7 +113,7 @@
     // compatibility layer is always consumed for one active term at a time,
     // so keep the same legacy shape while restricting the database read to
     // that term. This is read-only and does not alter stored data.
-    const termScoped = ['assignments', 'attendance', 'scores'].includes(name);
+    const termScoped = ['students', 'assignments', 'attendance', 'scores'].includes(name);
     const term = termScoped ? activeTermHint() : '';
     const terms = termScoped ? (termCandidates && termCandidates.length ? termCandidates : (term ? [term] : [])) : [''];
     if (termScoped && !terms.length) return { data: [], error: null };
@@ -125,7 +125,18 @@
       for (let offset = 0; ; offset += pageSize) {
         let query = client.from(tableName(name)).select(projections[name] || '*');
         if (termValue) query = query.eq('term_id', termValue);
-        const { data, error } = await query.range(offset, offset + pageSize - 1);
+        const result = name === 'assignments'
+          ? await query.limit(pageSize)
+          : await query.range(offset, offset + pageSize - 1);
+        let { data, error } = result;
+        // Keep bootstrap resilient to a problematic optional assignment
+        // column/legacy projection. Retry the smallest canonical projection
+        // before surfacing a real RLS/database error to the UI.
+        if (error && name === 'assignments') {
+          let fallback = client.from(tableName(name)).select('assignment_id,term_id,subject_code,title,max_score,level,room');
+          if (termValue) fallback = fallback.eq('term_id', termValue);
+          ({ data, error } = await fallback.limit(pageSize));
+        }
         if (error) return { data: null, error };
         const page = data || [];
         rows.push(...page);
@@ -201,6 +212,58 @@
     // such as 1/2569 are for display and must not be written as a second key.
     return found ? text(found.term_id || found.TermID || found.termId) : raw;
   }
+  // Scores are a high fan-out read: one class needs its roster, assignment
+  // columns, and scores for those assignments. Read those sets directly so
+  // the static Supabase build does not emulate a Firebase child listener or
+  // reread the full scores table once per assignment.
+  window.__SUPABASE_SCORE_GRID__ = async (context = {}) => {
+    const requestedTerm = text(context.term || context.termId || activeTermHint());
+    const { data: termRows, error: termError } = await client.from('terms').select('*');
+    if (termError) throw termError;
+    const termIds = termFilterCandidates(termRows || [], requestedTerm);
+    const scopedTerms = termIds.length ? termIds : [requestedTerm];
+    const readScoped = async (table, columns, filter) => {
+      const rows = [];
+      for (const termId of scopedTerms) {
+        let query = client.from(table).select(columns).eq('term_id', termId);
+        if (filter) query = filter(query);
+        const { data, error } = await query;
+        if (error) throw error;
+        rows.push(...(data || []));
+      }
+      return rows;
+    };
+    const [studentRows, assignmentRows] = await Promise.all([
+      readScoped('students', 'student_id,term_id,student_no,prefix,first_name,last_name,level,room,status,legacy_data', query => query.eq('level', text(context.level)).eq('room', text(context.room))),
+      readScoped('assignments', 'assignment_id,term_id,teacher_class_id,subject_code,title,assignment_type,max_score,due_date,level,room,status,legacy_data', query => query.eq('subject_code', text(context.subjectCode || context.subject)).eq('level', text(context.level)).eq('room', text(context.room)))
+    ]);
+    const assignmentIds = [...new Set(assignmentRows.map(row => text(row.assignment_id)).filter(Boolean))];
+    const scoreRows = [];
+    for (const termId of scopedTerms) {
+      if (!assignmentIds.length) break;
+      const { data, error } = await client.from('scores')
+        .select('score_id,term_id,assignment_id,student_id,subject_code,score,is_submitted,legacy_data')
+        .eq('term_id', termId).in('assignment_id', assignmentIds);
+      if (error) throw error;
+      scoreRows.push(...(data || []));
+    }
+    const students = studentRows.map(row => {
+      const value = legacyRow('students', row);
+      const firstName = text(value.FirstName), lastName = text(value.LastName);
+      return { id: text(value.StudentID), studentId: text(value.StudentID), prefix: text(value.Prefix), first: firstName, last: lastName, firstName, lastName, name: [text(value.Prefix), firstName, lastName].filter(Boolean).join(' '), no: value.StudentNo, level: text(value.Level), room: text(value.Room), status: text(value.Status), term: text(value.TermID || value.Term), termId: text(value.TermID || value.Term) };
+    });
+    const assignments = assignmentRows.map(row => {
+      const value = legacyRow('assignments', row);
+      return { id: text(value.AssignmentID), assignmentId: text(value.AssignmentID), title: text(value.Title), maxScore: Number(value.MaxScore || 0), subjectCode: text(value.SubjectCode), type: text(value.AssignmentType || value.Type), dateCreated: value.DateCreated, term: text(value.TermID || value.Term), termId: text(value.TermID || value.Term), classId: text(value.TeacherClassID || value.ClassID || value.classId), dueDate: value.DueDate, level: text(value.Level), room: text(value.Room), displayOrder: Number(value.DisplayOrder ?? value.displayOrder ?? 0) };
+    });
+    const scores = {};
+    scoreRows.forEach(row => {
+      const value = legacyRow('scores', row);
+      const score = { id: text(value.ScoreID), scoreId: text(value.ScoreID), assignmentId: text(value.AssignmentID), studentId: text(value.StudentID), teacherClassId: text(value.TeacherClassID), classId: text(value.ClassID || value.classId), termId: text(value.TermID || value.term_id), score: value.Score, isSubmitted: value.IsSubmitted, term: text(value.TermID || value.Term) };
+      if (score.assignmentId && score.studentId) scores[`${score.assignmentId}_${score.studentId}`] = score;
+    });
+    return { success: true, data: { term: requestedTerm, subject: text(context.subjectCode || context.subject), subjectCode: text(context.subjectCode || context.subject), level: text(context.level), room: text(context.room), students, assignments, scores, orphanScores: [] } };
+  };
   function pathParts(path) { return String(path || '').split('/').filter(Boolean); }
   async function persist(name, key, value) {
     const table = tableName(name);

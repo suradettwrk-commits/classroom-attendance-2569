@@ -1943,6 +1943,14 @@
     function safeEl(id) { return document.getElementById(id); }
     function hasEl(id) { return !!safeEl(id); }
     function getEl(id) { return safeEl(id); }
+    function esc(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
     function isTabVisible(id) { const el = safeEl(id); return !!(el && !el.classList.contains('hidden')); }
     function closeModal(id) { const el = getEl(id); if(el) el.classList.add('hidden'); }
     function btnLoading(btn, isLoading) {
@@ -3042,7 +3050,12 @@
             clearScoreView('กำลังโหลดรายชื่อนักเรียนและคะแนน...');
             setLoading(true);
             setScoreControlsLocked(true);
-            if (typeof window.firebaseSubscribeScoreGrid === 'function') {
+            // Supabase static builds use the repository's bounded one-shot
+            // read. The Firebase-shaped realtime shim is only a compatibility
+            // adapter there; it can swallow a failed child read and leave the
+            // score tab spinning without an actionable error. Keep the live
+            // listener path for the legacy Firebase build only.
+            if (typeof window.firebaseSubscribeScoreGrid === 'function' && !window.__SUPABASE_MODE__) {
                 const requestId = ++activeServerRequestId;
                 activeServerRequestKey = requestKey;
                 realtimeUnsubscribe = window.firebaseSubscribeScoreGrid({ subject, subjectCode: subject, level, room, term }, (res) => {

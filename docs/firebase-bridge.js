@@ -46,6 +46,15 @@
   }
 
   function ready() {
+    // Supabase owns identity in the production static build. Do not wait for
+    // Firebase LOCAL persistence here; that provider is only a compatibility
+    // surface and its cold restore timeout can starve the first data read.
+    if (window.__SUPABASE_MODE__ && window.__SUPABASE_CLIENT__) {
+      return Promise.resolve(window.__SUPABASE_CALLBACK_READY__)
+        .catch(() => null)
+        .then(() => window.__SUPABASE_CLIENT__.auth.getSession())
+        .then((result) => result?.data?.session?.user || window.__SUPABASE_CLIENT__.auth.currentUser || null);
+    }
     // Supabase can briefly expose currentUser=null while LOCAL persistence is
     // still restoring Google Auth. Waiting for persistence prevents admin calls
     // from falling through to Anonymous and receiving an empty/denied snapshot.
@@ -169,7 +178,7 @@
     return row && (row.Term || row.TermID || row.term || row.termId);
   }
   function subject(row, root) { return { code: text(row.SubjectCode), name: text(row.SubjectName), term: normalizedTerm(row.Term, root), status: text(row.Status), teacher: text(row.Teacher), classes: text(row.Classes) }; }
-  function assignment(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title), maxScore: Number(row.MaxScore || 0), subjectCode: text(row.SubjectCode), type: text(row.Type), dateCreated: row.DateCreated, term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate, level: text(row.Level), room: text(row.Room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
+  function assignment(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.AssignmentID), assignmentId: text(row.AssignmentID), title: text(row.Title || row.title), maxScore: Number(row.MaxScore ?? row.maxScore ?? 0), subjectCode: text(row.SubjectCode || row.subjectCode), type: text(row.Type || row.AssignmentType || row.assignmentType || 'Score'), dateCreated: row.DateCreated || row.dateCreated, term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), dueDate: row.DueDate || row.dueDate, level: text(row.Level || row.level), room: text(row.Room || row.room), displayOrder: Number(row.DisplayOrder ?? row.displayOrder ?? 0) }; }
   function attendance(row, root) { const rawTerm = row.TermID || row.Term || row.term; return { id: text(row.RecordID), recordId: text(row.RecordID), timestamp: row.Timestamp, date: text(row.Date), subject: text(row.SubjectCode), subjectCode: text(row.SubjectCode), level: text(row.Level), room: text(row.Room), studentId: text(row.StudentID), status: text(row.Status), recorder: text(row.Recorder), term: normalizedTerm(rawTerm, root), termId: canonicalTermId(rawTerm, root), classId: text(row.ClassID || row.classId), note: text(row.Note) }; }
   function score(row) {
     return {
@@ -1587,7 +1596,7 @@
     },
     getDashboard: (context = {}) => {
       const normalized = repositoryContext(context);
-      return callReadWithRecovery('getDashboardStats', [normalized.term], { timeoutMs: 30000, retries: 0 });
+      return callReadWithRecovery('getDashboardStats', [normalized], { timeoutMs: 30000, retries: 0 });
     },
     getStudents: (context = {}) => repositoryRead('getStudentsByFilter', repositoryContext(context)),
     getAssignments: (context = {}) => {
@@ -1603,7 +1612,9 @@
         });
     },
     getAttendance: (context = {}) => repositoryRead('getAttendanceForCheck', repositoryContext(context)),
-    getScoreGrid: (context = {}) => repositoryRead('loadScoresGrid', repositoryContext(context)),
+    getScoreGrid: (context = {}) => window.__SUPABASE_MODE__ && typeof window.__SUPABASE_SCORE_GRID__ === 'function'
+      ? window.__SUPABASE_SCORE_GRID__(repositoryContext(context))
+      : repositoryRead('loadScoresGrid', repositoryContext(context)),
     getGradingRoster: (context = {}) => repositoryRead('getGradingData', repositoryContext(context)),
     saveAttendance: (context = {}) => repositoryWrite('saveAttendance', repositoryContext(context)),
     saveScores: (context = {}) => repositoryWrite('saveScoresBatch', repositoryContext(context)),
@@ -1626,7 +1637,7 @@
     getAttendanceForCheck: (args) => window.classroomRepository.getAttendance(args[0] || {}),
     loadScoresGrid: (args) => window.classroomRepository.getScoreGrid(args[0] || {}),
     getGradingData: (args) => window.classroomRepository.getGradingRoster(args[0] || {}),
-    getDashboardStats: (args) => window.classroomRepository.getDashboard({ term: args[0] }),
+    getDashboardStats: (args) => window.classroomRepository.getDashboard(args[0] || {}),
     getInitialDropdowns: (args) => window.classroomRepository.getAllowedScopes({ termId: window.CURRENT_SERVER_TERM, user: args[0] }),
     saveAttendance: (args) => window.classroomRepository.saveAttendance(args[0] || {}),
     saveScoresBatch: (args) => window.classroomRepository.saveScores(args[0] || {}),
