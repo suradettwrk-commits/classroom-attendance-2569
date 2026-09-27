@@ -1,6 +1,82 @@
 # Handoff: งานทำให้ระบบนิ่งและลื่นไหล
 
+> **สถานะอ้างอิงปัจจุบัน — 27 กันยายน 2569**
+>
+> ให้อ่านส่วนนี้ก่อนทุกครั้ง ส่วนบันทึกด้านล่างเป็นประวัติการแก้ไขเดิมและอาจมีสถานะที่ล้าสมัย ห้ามย้อนกลับไปทำซ้ำหรือสรุปจากข้อความเก่าโดยไม่เทียบกับส่วนนี้
+>
+> **ผลลัพธ์ล่าสุด: RELEASED / DEPLOYED**
+>
+> - ฐาน release คือ `origin/main` ของ `https://github.com/suradettwrk-commits/classroom-attendance-2569.git`
+> - commit ล่าสุดที่ deploy คือ `4766347 fix: route supabase score grid through bounded read`
+> - push ไป `origin/main` สำเร็จแบบ fast-forward ปกติจาก `cd9d16a` เป็น `4766347`
+> - ห้ามใช้ Force Push และห้ามนำ branch `main` ใน OneDrive ที่ประวัติแยกกันมาผสานทับ release โดยตรง
+> - GitHub Actions `Deploy GitHub Pages #59` ผ่าน และ `pages-build-deployment #73` ผ่าน
+> - Production URL: `https://suradettwrk-commits.github.io/classroom-attendance-2569/`
+>
+> **ขอบเขตที่ยืนยันแล้ว**
+>
+> - แก้เฉพาะเส้นทางโหลด Scores ที่ช้า/ค้างใน Supabase static build ด้วย bounded direct read: terms → students/assignments → scores ของ assignment ที่เลือก
+> - คง Firebase realtime path ไว้สำหรับ legacy build; Supabase ไม่ใช้ compatibility listener เป็นเส้นทางแรก
+> - ไม่เปลี่ยนแนวทาง UX/UI, CSS, layout หรือ print; ห้ามปรับหน้าตา/interaction เดิมโดยไม่มีคำสั่งผู้ใช้
+> - ไม่เปิดตรวจหรือแก้ `admin.html?verify=20260927-admin` ซ้ำ เพราะเป็นหน้าทดสอบที่เคยแสดงผลเพี้ยนและอยู่นอกขอบเขตการแก้ Scores
+>
+> **หลักฐาน acceptance ล่าสุด**
+>
+> - Local + Supabase จริง: Student, Attendance, Scores, Grading ผ่านแบบ read-only
+> - Student/Attendance/Grading แสดงเลขที่ 1–40 ถูกต้อง; Scores Production แสดง 7 งาน, 40 คน, ลำดับ 1–40 และไม่มี `undefined`
+> - Production Scores: `1/2569 / ส22101 / ม.2 / ห้อง 8` โหลดข้อมูลได้จริง ไม่ค้าง spinner
+> - admin `suradet.t@wrk.ac.th` และครู `suradett.wrk@eisth.org` ผ่าน active staff/RLS identity check
+> - settings CRUD ของ admin/ครูทดสอบด้วย transaction + rollback แล้ว และตรวจหลัง rollback ไม่เหลือ probe rows
+> - mapping 26 รายการที่มี single candidate ทำแล้ว; quarantine 4 รายการยังคง NULL ตามหลักความปลอดภัย ห้ามเดาและเติมเพิ่ม
+>
+> **สิ่งที่ต้องทำต่อเมื่อมีงานใหม่เท่านั้น**
+>
+> 1. อ่านไฟล์นี้และตรวจ `git status`, `git log`, `origin/main` ก่อนแก้เสมอ
+> 2. เปลี่ยนเฉพาะ scope ที่ผู้ใช้ระบุ; ห้าม refactor ใหญ่หรือปรับ UX/UI เพียงเพราะ local ต่างจาก production
+> 3. งาน read ใช้ read-only เป็นค่าเริ่มต้น; งาน write ต้องมีคำสั่งชัดเจนและใช้ transaction/rollback หรือ test namespace ที่ปลอดภัย
+> 4. ก่อน commit รัน syntax, repository/release/UI contracts และ `git diff --check`; build `docs/` ให้ตรง source
+> 5. commit บนฐาน `origin/main`, push แบบปกติเท่านั้น แล้วรอ Actions ตรวจ Production แบบ read-only
+> 6. หากพบความต่างระหว่าง local กับ production ให้หยุดและรายงานความต่างก่อนแก้ อย่าสรุปว่าเป็นเหตุให้ต้องเปลี่ยน UI
+>
+> **ห้ามทำซ้ำโดยไม่มี source เปลี่ยนหรือผู้ใช้สั่ง**: ตรวจ login/ทุกแท็บซ้ำทั้งหมด, mapping/quarantine ที่ผ่านการตัดสินใจแล้ว, CRUD จริงแบบเขียนค้าง, force push, reset/checkout ทับไฟล์ผู้ใช้, และการเพิ่มข้อมูลทดลองในฐานข้อมูลจริง
+
 วันที่ส่งต่องาน: 26 กันยายน 2569
+
+## Work log — 27 กันยายน 2569
+
+ตรวจ URL deploy จริง `https://suradettwrk-commits.github.io/classroom-attendance-2569/` หลัง reload พบว่า session เปิดได้ แต่ Scores dropdown ว่างและ console มี `SUPABASE_READ_SKIPPED:assignments ... statement timeout` จึงยืนยันว่า production ยังไม่เสถียร แม้หน้าเว็บจะเปิดได้
+
+ตรวจ Supabase staging แบบ read-only แล้วพบ canonical term `AY2569_T1` (label `1/2569`), assignments 88 และ students 3152 พร้อม index activity และ RLS policies ครบ SELECT/INSERT/UPDATE/DELETE
+
+แก้บน worktree ที่ตรงกับ `origin/main`:
+
+- Supabase mode ไม่รอ Firebase auth persistence ก่อนอ่านข้อมูล
+- scope `students` ด้วย canonical `term_id` เช่นเดียวกับ activity tables
+- assignment bootstrap ใช้ fallback projection ที่เล็กลงเมื่อ projection หลักล้ม
+- dashboard route ส่ง `term/date/user` context เดิมครบ ไม่ห่อ object ซ้ำ
+- เพิ่ม `esc()` กลางใน `admin.html`
+
+ผล local release-candidate จาก build ล่าสุด:
+
+- Google callback/session restore: ผ่าน
+- dashboard: 319 นักเรียน, 63 งาน, term summary แสดงผล
+- subject/level/room dropdown ของ attendance, scores, grading: มีข้อมูลและเลือกค่าได้
+- console error/warning functional: ไม่พบในการ clean session
+- syntax/repository contract/diff check: ผ่าน
+
+รอบ acceptance ล่าสุดพบข้อค้างใหม่ที่ต้องแก้ก่อนสรุปว่า release candidate ผ่าน:
+
+- หลังเปิด Scores ด้วย `S22101 / ม.2 / 8` แล้วรอเกิน 30 วินาที ตารางยังค้าง `กำลังโหลดข้อมูล...` โดยไม่มี `error` หรือ `warn` ใน browser console; dropdown มีข้อมูลแล้ว แต่ score grid ยังไม่ render จึงยังไม่ผ่าน
+- ห้ามสรุป score read ผ่านจนกว่าจะเห็นรายชื่อนักเรียน/คอลัมน์งานจริง หรือแสดง error state ที่กู้คืนได้แทน spinner ค้าง
+- รอบนี้ไม่พบการแก้ CSS และไม่แตะ logic การพิมพ์
+
+### Baseline correction (27 กันยายน 2569)
+
+- ห้ามใช้ candidate นี้เป็น UX/UI baseline ต่อ: สร้างจาก `origin/main` ซึ่งมี commit `d11f828` เปลี่ยนจาก Tailwind CDN เป็น static `tailwind.css` และทำให้ `admin.html`/`index.html` ต่างจาก worktree ที่ผู้ใช้กำลังใช้งานอยู่หลายส่วน
+- ผู้ใช้ยืนยันว่าหน้าตาและ interaction เดิมต้องคงเดิม แม้ทดสอบ local หรือเตรียม deploy ดังนั้นงานถัดไปต้องสร้าง candidate จาก UI baseline เดิม แล้ว cherry-pick/นำเข้าเฉพาะ data/term/CRUD fixes ที่จำเป็น ห้ามนำ CSS/layout refactor จาก `origin/main` มาปน
+- Worktree นี้จึงเป็นเพียงหลักฐานวิเคราะห์ branch ล่าสุด ไม่ใช่ release source จนกว่าจะทำ baseline comparison และยืนยันหน้าจอเทียบกับ deploy/ไฟล์เดิม
+
+ยังไม่ใช่ production deployment: changes ยัง uncommitted และยังต้องผ่าน CRUD write/RLS, admin/no-access, orphan/mapping/integrity gates ก่อน push
 
 ## เป้าหมายเดิม
 
