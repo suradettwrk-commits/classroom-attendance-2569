@@ -191,7 +191,7 @@
       terms: ['TermID', 'term_id', 'termId'], students: ['StudentID', 'student_id', 'studentId'],
       subjects: ['SubjectCode', 'subject_code', 'subjectCode'], teacherClasses: ['TeacherClassID', 'teacher_class_id', 'teacherClassId'],
       assignments: ['AssignmentID', 'assignment_id', 'assignmentId'], attendance: ['RecordID', 'record_id', 'recordId'],
-      scores: ['ScoreID', 'score_id', 'scoreId'], users: ['UserID', 'user_id', 'userId'], authProfiles: ['id', 'legacy_user_id']
+      scores: ['ScoreID', 'score_id', 'scoreId'], users: ['UserID', 'user_id', 'userId'], authProfiles: ['id', 'legacy_user_id'], settings: ['setting_key', 'Key', 'key']
     }[name] || [];
     return text(candidates.map(k => row && row[k]).find(Boolean));
   }
@@ -199,6 +199,10 @@
   function legacyRow(name, row) {
     const base = row && row.legacy_data && typeof row.legacy_data === 'object' ? clone(row.legacy_data) : {};
     const out = { ...base, ...clone(row) };
+    if (name === 'settings') {
+      const value = row && row.value && typeof row.value === 'object' ? clone(row.value) : {};
+      Object.assign(out, value, { Key: first(row, ['setting_key', 'Key', 'key']) || value.Key, TermID: first(row, ['term_id', 'TermID']) || value.TermID });
+    }
     if (name === 'terms') Object.assign(out, { TermID: first(row, ['term_id', 'termId', 'TermID']), TermNo: first(row, ['term_no', 'termNo', 'TermNo']), AcademicYear: first(row, ['academic_year', 'academicYear', 'AcademicYear']), Status: first(row, ['status', 'Status']) });
     if (name === 'students') Object.assign(out, { StudentID: first(row, ['student_id', 'studentId', 'StudentID']), TermID: first(row, ['term_id', 'termId', 'TermID']), Term: first(row, ['display_term', 'term', 'Term', 'term_id']), StudentNo: first(row, ['student_no', 'studentNo', 'StudentNo']), Prefix: first(row, ['prefix', 'Prefix']), FirstName: first(row, ['first_name', 'firstName', 'FirstName']), LastName: first(row, ['last_name', 'lastName', 'LastName']), Level: first(row, ['level', 'Level']), Room: first(row, ['room', 'Room']), Status: first(row, ['status', 'Status']) });
     if (name === 'subjects') Object.assign(out, { SubjectCode: first(row, ['subject_code', 'subjectCode', 'SubjectCode']), TermID: first(row, ['term_id', 'termId', 'TermID']), SubjectName: first(row, ['subject_name', 'subjectName', 'SubjectName']), Teacher: first(row, ['teacher', 'Teacher']), Status: first(row, ['status', 'Status']) });
