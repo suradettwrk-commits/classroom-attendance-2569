@@ -3185,11 +3185,13 @@ var DATA_CONTROLLER = new DataController();
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                     <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">ความคืบหน้าการส่งงาน</p>
                     <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-assignment-progress">-</h3>
+                    <div class="h-2 mt-3 bg-slate-100 rounded-full overflow-hidden"><div id="dash-assignment-progress-bar" class="h-full bg-orange-400 rounded-full transition-all duration-300" style="width:0%"></div></div>
                     <p class="text-xs text-slate-400 mt-1" id="dash-assignment-progress-detail">-</p>
                 </div>
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                     <p class="text-slate-400 text-xs uppercase font-bold tracking-wider">คะแนนเฉลี่ยห้อง</p>
                     <h3 class="text-3xl font-bold text-slate-800 mt-1" id="dash-score-average">-</h3>
+                    <div class="h-2 mt-3 bg-slate-100 rounded-full overflow-hidden"><div id="dash-score-average-bar" class="h-full bg-pink-500 rounded-full transition-all duration-300" style="width:0%"></div></div>
                     <p class="text-xs text-slate-400 mt-1" id="dash-score-average-detail">-</p>
                 </div>
             </div>
@@ -5732,6 +5734,10 @@ var DATA_CONTROLLER = new DataController();
             return Math.max(0, Math.min(Math.round(n), Number(maxScore) || 0));
         };
         const isStudentInactive = (student) => ['inactive', 'ลาออก', 'ลาออกแล้ว', 'withdrawn', 'left', 'พักการเรียน', 'พักเรียน', 'suspended'].includes(String(student && (student.status ?? student.Status) || '').trim().toLowerCase());
+        const studentStatusLabel = (student) => {
+            const raw = String(student && (student.status ?? student.Status) || '').trim().toLowerCase();
+            return ['พักการเรียน', 'พักเรียน', 'suspended'].includes(raw) ? 'พักการเรียน' : (isStudentInactive(student) ? 'ลาออกแล้ว' : 'Active');
+        };
         const setScoreControlsLocked = (locked) => {
             if (els.tbody) els.tbody.querySelectorAll('input,button').forEach(el => { el.disabled = !!locked; });
             const saveAll = getEl('btn-sc-save-all'); if (saveAll) saveAll.disabled = !!locked || _saveAllInProgress;
@@ -6616,7 +6622,7 @@ var DATA_CONTROLLER = new DataController();
             let levelStr = state.filter.level.replace(/^(ม\.|M\.|m\.|Grade\s?)/, ''); 
             if(document.getElementById('print-doc-subtitle')) document.getElementById('print-doc-subtitle').innerText = `วิชา: ${subName} | ภาคเรียนที่ ${term} | ชั้นมัธยมศึกษาปีที่ ${levelStr}/${state.filter.room}`;
             
-            let html = `<table><thead><tr><th style="width: 30px;">#</th><th style="width: 70px;">รหัส</th><th style="text-align:left; padding-left:8px;">ชื่อ - นามสกุล</th>`;
+            let html = `<table><thead><tr><th style="width: 30px;">#</th><th style="width: 70px;">รหัส</th><th style="text-align:left; padding-left:8px;">ชื่อ - นามสกุล</th><th style="width: 90px;">สถานะ</th>`;
             let legendItems = [];
             state.assignments.forEach(asn => { 
                 const parts = asn.title.split(':::');
@@ -6628,7 +6634,9 @@ var DATA_CONTROLLER = new DataController();
             });
             html += `</tr></thead><tbody>`;
             state.students.forEach(std => {
-                html += `<tr><td style="text-align:center;">${std.no}</td><td style="text-align:center;">${std.id}</td><td>${std.prefix}${std.first} ${std.last}</td>`;
+                const statusLabel = studentStatusLabel(std);
+                const statusStyle = isStudentInactive(std) ? 'background:#e2e8f0; color:#475569;' : 'background:#dcfce7; color:#166534;';
+                html += `<tr><td style="text-align:center;">${std.no}</td><td style="text-align:center;">${std.id}</td><td>${std.prefix}${std.first} ${std.last}</td><td style="text-align:center;"><span style="display:inline-block; padding:2px 6px; border-radius:999px; font-size:9px; font-weight:700; ${statusStyle}">${statusLabel}</span></td>`;
                 state.assignments.forEach(asn => {
                     const rawVal = state.scores[`${asn.id}_${std.id}`];
                     const presentation = getExportScorePresentation(asn, rawVal);
@@ -6672,8 +6680,8 @@ var DATA_CONTROLLER = new DataController();
             if (!state.students.length) return Swal.fire('เตือน', 'กรุณาเลือกข้อมูลและโหลดตารางก่อนดาวน์โหลดรูปภาพ', 'warning');
             const assignments = state.assignments;
             const canvas = document.createElement('canvas');
-            const noWidth = 55, idWidth = 90, nameWidth = 270, scoreWidth = 110, margin = 36;
-            const imageWidth = margin * 2 + noWidth + idWidth + nameWidth + Math.max(1, assignments.length) * scoreWidth;
+            const noWidth = 55, idWidth = 90, nameWidth = 270, statusWidth = 120, scoreWidth = 110, margin = 36;
+            const imageWidth = margin * 2 + noWidth + idWidth + nameWidth + statusWidth + Math.max(1, assignments.length) * scoreWidth;
             const imageHeight = 112 + 46 + state.students.length * 40 + 58;
             const scale = 3;
             canvas.width = Math.round(imageWidth * scale);
@@ -6703,14 +6711,15 @@ var DATA_CONTROLLER = new DataController();
             const badgeWidth = 178, badgeHeight = 52, badgeX = imageWidth - margin - badgeWidth, badgeY = 8;
             ctx.fillStyle = '#1d4ed8'; ctx.beginPath(); ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 10); ctx.fill();
             ctx.fillStyle = '#ffffff'; ctx.font = `bold 25px ${thaiFont}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(roomLabel, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2);
-            const headers = ['#', 'รหัส', 'ชื่อ - นามสกุล', ...assignments.map(asn => `${String(asn.title || '').split(':::')[0]}${isExportScoreHidden(asn) ? ' [ซ่อน]' : ''} (${asn.maxScore})`)];
-            const widths = [noWidth, idWidth, nameWidth, ...assignments.map(() => scoreWidth)];
+            const headers = ['#', 'รหัส', 'ชื่อ - นามสกุล', 'สถานะ', ...assignments.map(asn => `${String(asn.title || '').split(':::')[0]}${isExportScoreHidden(asn) ? ' [ซ่อน]' : ''} (${asn.maxScore})`)];
+            const widths = [noWidth, idWidth, nameWidth, statusWidth, ...assignments.map(() => scoreWidth)];
             let x = margin, y = 112;
             headers.forEach((header, index) => { cell(x, y, widths[index], 46, '#eef2ff'); textFit(header, x + widths[index] / 2, y + 23, widths[index] - 8, `bold 14px ${thaiFont}`, '#1e40af', 'center'); x += widths[index]; });
             state.students.forEach((student, rowIndex) => {
                 y = 158 + rowIndex * 40; x = margin;
-                const base = [student.no, student.id, `${student.prefix || ''}${student.first || ''} ${student.last || ''}`];
-                base.forEach((value, index) => { cell(x, y, widths[index], 40, rowIndex % 2 ? '#f8fafc' : '#ffffff'); textFit(value, index === 2 ? x + 8 : x + widths[index] / 2, y + 20, widths[index] - 12, index === 2 ? `bold 16px ${thaiFont}` : `14px ${thaiFont}`, '#0f172a', index === 2 ? 'left' : 'center'); x += widths[index]; });
+                const inactive = isStudentInactive(student);
+                const base = [student.no, student.id, `${student.prefix || ''}${student.first || ''} ${student.last || ''}`, studentStatusLabel(student)];
+                base.forEach((value, index) => { cell(x, y, widths[index], 40, index === 3 ? (inactive ? '#e2e8f0' : '#dcfce7') : (rowIndex % 2 ? '#f8fafc' : '#ffffff')); textFit(value, index === 2 ? x + 8 : x + widths[index] / 2, y + 20, widths[index] - 12, index === 2 ? `bold 16px ${thaiFont}` : `14px ${thaiFont}`, index === 3 ? (inactive ? '#475569' : '#166534') : '#0f172a', index === 2 ? 'left' : 'center'); x += widths[index]; });
                 assignments.forEach(asn => {
                     const raw = state.scores[`${asn.id}_${student.id}`];
                     const presentation = getExportScorePresentation(asn, raw);
@@ -8742,8 +8751,10 @@ var DATA_CONTROLLER = new DataController();
         if(getEl('dash-total-student')) getEl('dash-total-student').innerText=s.totalStudents; 
         if(getEl('dash-present-today')) getEl('dash-present-today').innerText=s.hasAttendanceData ? s.presentToday : 'ยังไม่เช็ค';
         if(getEl('dash-assignment-progress')) getEl('dash-assignment-progress').innerText=s.scoreDataAvailable && s.assignmentProgress !== null ? `${s.assignmentProgress}%` : 'ยังไม่มีข้อมูล';
+        if(getEl('dash-assignment-progress-bar')) getEl('dash-assignment-progress-bar').style.width = `${s.scoreDataAvailable && s.assignmentProgress !== null ? Math.min(100, Math.max(0, Number(s.assignmentProgress) || 0)) : 0}%`;
         if(getEl('dash-assignment-progress-detail')) getEl('dash-assignment-progress-detail').innerText=s.scoreDataAvailable ? `${s.gradedAssignments || 0}/${s.applicableAssignments || 0} งานมีคะแนน` : 'ยังไม่มีคะแนนงาน';
         if(getEl('dash-score-average')) getEl('dash-score-average').innerText=s.scoreDataAvailable && s.scoreAverage !== null ? `${s.scoreAverage}%` : 'ยังไม่มีข้อมูล';
+        if(getEl('dash-score-average-bar')) getEl('dash-score-average-bar').style.width = `${s.scoreDataAvailable && s.scoreAverage !== null ? Math.min(100, Math.max(0, Number(s.scoreAverage) || 0)) : 0}%`;
         if(getEl('dash-score-average-detail')) getEl('dash-score-average-detail').innerText=s.scoreDataAvailable ? `งานค้าง ${s.pendingScoreStudents || 0} คน` : 'ยังไม่มีคะแนนงาน';
         const scopeWarning = getEl('dash-teacher-scope-warning');
         if (scopeWarning) {
