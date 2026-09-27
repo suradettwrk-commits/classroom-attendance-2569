@@ -3862,12 +3862,13 @@
                 const statusLabel = studentStatusLabel(std);
                 const rowStyle = inactive ? ' style="background:#e2e8f0; color:#475569;"' : '';
                 const nameSuffix = inactive ? ` <span style="display:inline-block; padding:2px 6px; border-radius:999px; font-size:9px; font-weight:700; background:#cbd5e1; color:#475569;">🔒 ${statusLabel}</span>` : '';
-                html += `<tr${rowStyle}><td style="text-align:center;">${std.no}</td><td style="text-align:center;">${std.id}</td><td>${std.prefix}${std.first} ${std.last}${nameSuffix}</td>`;
+                const baseCellStyle = inactive ? 'background:#e2e8f0; color:#475569;' : '';
+                html += `<tr${rowStyle}><td style="${baseCellStyle} text-align:center;">${std.no}</td><td style="${baseCellStyle} text-align:center;">${std.id}</td><td style="${baseCellStyle}">${std.prefix}${std.first} ${std.last}${nameSuffix}</td>`;
                 state.assignments.forEach(asn => {
                     const rawVal = state.scores[`${asn.id}_${std.id}`];
                     const presentation = getExportScorePresentation(asn, rawVal);
                     const display = (asn.type === 'Check' || presentation.hidden) ? `<span style="font-family:Arial, sans-serif; font-size:15px; font-weight:700;">${presentation.display}</span>` : presentation.display;
-                    const cellStyle = `text-align:center; vertical-align:middle; font-size:${presentation.emphasized ? '14px' : '11px'}; font-weight:${presentation.emphasized ? '700' : '400'}; background-color:${presentation.cellColor}; color:${presentation.textColor}; -webkit-print-color-adjust:exact; print-color-adjust:exact;`;
+                    const cellStyle = `text-align:center; vertical-align:middle; font-size:${presentation.emphasized ? '14px' : '11px'}; font-weight:${presentation.emphasized ? '700' : '400'}; background-color:${inactive ? '#e2e8f0' : presentation.cellColor}; color:${inactive ? '#64748b' : presentation.textColor}; -webkit-print-color-adjust:exact; print-color-adjust:exact;`;
                     html += `<td style="${cellStyle}">${display}</td>`;
                 });
                 html += `</tr>`;
@@ -3951,7 +3952,7 @@
                 assignments.forEach(asn => {
                     const raw = state.scores[`${asn.id}_${student.id}`];
                     const presentation = getExportScorePresentation(asn, raw);
-                    cell(x, y, scoreWidth, 40, presentation.cellColor); textFit(presentation.display, x + scoreWidth / 2, y + 20, scoreWidth - 8, `bold ${presentation.emphasized ? '18px' : '18px'} ${thaiFont}`, presentation.textColor, 'center'); x += scoreWidth;
+                    cell(x, y, scoreWidth, 40, inactive ? '#e2e8f0' : presentation.cellColor); textFit(presentation.display, x + scoreWidth / 2, y + 20, scoreWidth - 8, `bold ${presentation.emphasized ? '18px' : '18px'} ${thaiFont}`, inactive ? '#64748b' : presentation.textColor, 'center'); x += scoreWidth;
                 });
             });
             const filename = `คะแนน_HD3x_${subjectName}_${state.filter.level}_${state.filter.room}`.replace(/[\\/:*?"<>|\s]+/g, '_');
