@@ -1480,6 +1480,10 @@
         : { success: true, message: 'บันทึกข้อมูลสำเร็จ' };
     }
     if (name === 'saveUserProfile') {
+      if (window.__SUPABASE_MODE__ && typeof window.__SUPABASE_SAVE_USER_PROFILE__ === 'function') {
+        await teacherOrAdmin(arg);
+        return window.__SUPABASE_SAVE_USER_PROFILE__(arg, args[1]);
+      }
       await teacherOrAdmin(arg); const key = text(arg.id || arg.userId); if (!key) return resultError('ไม่พบรหัสผู้ใช้');
       const existing = (await db.ref(`users/${firebaseKey(key)}`).once('value')).val() || {};
       const record = {

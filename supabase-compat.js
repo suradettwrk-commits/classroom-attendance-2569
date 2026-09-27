@@ -52,6 +52,47 @@
   let rootCache = null;
   const listeners = [];
 
+  // Profile writes must target the existing app_users row. CURRENT_USER.id
+  // can be a legacy UserID and is not guaranteed to equal app_users.user_id;
+  // using it as an upsert key would turn a profile edit into an INSERT.
+  async function saveOwnProfile(arg, imageData) {
+    const sessionResult = await client.auth.getSession();
+    const sessionUser = sessionResult.data?.session?.user || client.auth.currentUser;
+    const email = text(sessionUser?.email).toLowerCase();
+    if (!email) throw new Error('ไม่พบอีเมล Google ของผู้ใช้ปัจจุบัน');
+    const { data: existing, error: readError } = await client.from('app_users')
+      .select('user_id,email,role,status,legacy_data')
+      .eq('email', email)
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!existing || !text(existing.user_id)) throw new Error('ไม่พบแถวโปรไฟล์ของอีเมล Google นี้ใน app_users');
+    const legacy = existing.legacy_data && typeof existing.legacy_data === 'object' ? existing.legacy_data : {};
+    const profileImage = text(imageData)
+      ? (text(imageData).startsWith('data:image/') ? text(imageData) : `data:image/jpeg;base64,${text(imageData)}`)
+      : text(legacy.ProfileImage || legacy.profileImage || legacy.profile_image);
+    const nextLegacy = {
+      ...legacy,
+      Username: text(arg?.username) || text(legacy.Username || legacy.username),
+      Name: text(arg?.name) || text(legacy.Name || legacy.name),
+      Prefix: text(arg?.prefix) || text(legacy.Prefix || legacy.prefix),
+      LastName: text(arg?.lastName) || text(legacy.LastName || legacy.lastName),
+      Position: text(arg?.position) || text(legacy.Position || legacy.position),
+      School: text(arg?.school) || text(legacy.School || legacy.school),
+      Group: text(arg?.group) || text(legacy.Group || legacy.group)
+    };
+    if (profileImage) nextLegacy.ProfileImage = profileImage;
+    const { data: updated, error: updateError } = await client.from('app_users')
+      .update({ legacy_data: nextLegacy, updated_at: new Date().toISOString() })
+      .eq('user_id', existing.user_id)
+      .select('user_id')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('ไม่สามารถยืนยันการอัปเดตโปรไฟล์ใน app_users ได้');
+    return { success: true, message: 'อัปเดตโปรไฟล์สำเร็จ' };
+  }
+
+  window.__SUPABASE_SAVE_USER_PROFILE__ = saveOwnProfile;
+
   function tableName(name) { return tableMap[name] || name; }
   function activeTermHint() {
     const fromWindow = text(window.CURRENT_SERVER_TERM);
