@@ -899,7 +899,11 @@
     const subjectCode = text(filter.subject);
     const level = text(filter.level);
     const room = text(filter.room);
-    const students = values('students', root).filter((r) => matchesTerm(r.Term || r.TermID || r.term, term, root) && text(r.Level) === level && text(r.Room) === room).map((r) => student(r, root)).sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0));
+    const students = values('students', root).filter((r) => matchesTerm(r.Term || r.TermID || r.term, term, root) && text(r.Level) === level && text(r.Room) === room).map((r) => student(r, root)).sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0))
+      // StudentNo is source data and must not be rewritten after a deletion.
+      // Grading is a filtered class roster, so its displayed number is the
+      // current 1..N position while the stable student id remains unchanged.
+      .map((row, index) => ({ ...row, no: index + 1 }));
     const assignments = values('assignments', root).filter((r) => matchesTerm(r.Term || r.TermID || r.term, term, root) && text(r.SubjectCode || r.subjectCode) === subjectCode && (!level || text(r.Level || r.level) === level) && (!room || text(r.Room || r.room) === room)).map((r) => assignment(r, root));
     const studentIds = new Set(students.map((s) => s.id));
     const exams = {};
