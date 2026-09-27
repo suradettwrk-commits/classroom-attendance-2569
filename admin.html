@@ -1394,6 +1394,19 @@
             return !['DELETE_STUDENT', 'USER', 'DELETE_USER', 'SUBJECT', 'DELETE_SUBJECT'].includes(String(task && task.type || '').toUpperCase());
         }
 
+        discardUnauthorizedStudentDeletes() {
+            const role = String(CURRENT_USER && CURRENT_USER.role || '').toLowerCase();
+            if (role === 'admin') return 0;
+            const before = this.queue.length;
+            this.queue = this.queue.filter(task => String(task && task.type || '').toUpperCase() !== 'DELETE_STUDENT');
+            const removed = before - this.queue.length;
+            if (removed) {
+                this.save();
+                console.warn('SYNC_ENGINE: discarded unauthorized DELETE_STUDENT tasks', removed);
+            }
+            return removed;
+        }
+
         requiresVerifiedAuth(task) {
             return ['SCORE', 'ATTENDANCE', 'STUDENT', 'STUDENT_STATUS', 'DELETE_STUDENT', 'ASSIGNMENT', 'DELETE_ASSIGNMENT'].includes(String(task && task.type || '').toUpperCase());
         }
@@ -1550,6 +1563,7 @@
             if (this.paused) return;
             if (this.isSyncing) return;
             if (!CURRENT_USER || !CURRENT_USER.id) return;
+            this.discardUnauthorizedStudentDeletes();
             const waitingForAuth = this.queue.some(task => this.requiresVerifiedAuth(task)) && !this.hasVerifiedWriteIdentity();
             if (waitingForAuth) {
                 this.updateUI('auth-wait');
@@ -5209,7 +5223,7 @@
                 <td class="p-4 text-center">
                     <div class="flex justify-center gap-2 opacity-100 transition-all duration-200">
                         <button onclick="openStudentModal('edit', '${safeId}')" class="w-8 h-8 flex items-center justify-center rounded-lg text-school-primary bg-blue-50 hover:bg-school-primary hover:text-white transition shadow-sm" title="แก้ไข"><i class="fa-solid fa-pen-to-square"></i></button>
-                        <button onclick="deleteStudent('${safeId}')" class="w-8 h-8 flex items-center justify-center rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white transition shadow-sm" title="ลบ"><i class="fa-solid fa-trash-can"></i></button>
+                        ${String(CURRENT_USER && (CURRENT_USER.role || CURRENT_USER.Role) || '').toLowerCase() === 'admin' ? `<button onclick="deleteStudent('${safeId}')" class="w-8 h-8 flex items-center justify-center rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white transition shadow-sm" title="ลบ"><i class="fa-solid fa-trash-can"></i></button>` : ''}
                     </div>
                 </td>
             </tr>`;
@@ -5375,7 +5389,11 @@
     }
 
     function deleteStudent(id) {
-        const termVal = getEl('current-term-display').value; 
+        if (String(CURRENT_USER && (CURRENT_USER.role || CURRENT_USER.Role) || '').toLowerCase() !== 'admin') {
+            Swal.fire({ icon: 'info', title: 'ไม่มีสิทธิ์ลบนักเรียน', text: 'การลบนักเรียนทำได้เฉพาะผู้ดูแลระบบ', confirmButtonText: 'ตกลง' });
+            return;
+        }
+        const termVal = getEl('current-term-display').value;
         const term = normalizeTerm(termVal) || window.CURRENT_SERVER_TERM;
         Swal.fire({ 
             title: 'ยืนยันการลบ?', 
