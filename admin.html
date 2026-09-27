@@ -1042,6 +1042,15 @@
                 <span id="asn-context-info">...</span>
             </div>
 
+            <div id="asn-multi-room-wrap" class="hidden border border-cyan-100 bg-cyan-50/60 rounded-xl p-3">
+                <label class="flex items-center gap-2 text-xs font-bold text-cyan-800 cursor-pointer">
+                    <input id="asn-multi-room" type="checkbox" class="accent-cyan-600">
+                    สร้างคอลัมน์นี้ในห้องอื่นพร้อมกัน
+                </label>
+                <div id="asn-multi-room-list" class="hidden mt-2 grid grid-cols-2 gap-2"></div>
+                <p class="text-[10px] text-cyan-700 mt-2">สร้างเฉพาะหัวคอลัมน์ ไม่คัดลอกคะแนนนักเรียน</p>
+            </div>
+
             <div class="flex justify-between items-center pt-4 border-t border-slate-100 mt-6">
                 <button type="button" id="btn-asn-delete" onclick="SCORES_MANAGER.handleDeleteAssignment()" class="text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg text-sm font-bold transition hidden">
                     <i class="fa-solid fa-trash-can mr-1"></i> ลบงานนี้
@@ -3590,14 +3599,50 @@
             });
         };
 
+        const getAssignmentTargetRooms = () => {
+            const subject = String(els.filters.subject.value || ''), level = String(els.filters.level.value || ''), currentRoom = String(els.filters.room.value || '');
+            const rows = [];
+            const add = row => {
+                const rowSubject = String(row && (row.subjectCode ?? row.subject ?? row.SubjectCode ?? row.Subject ?? '') || '');
+                const rowLevel = String(row && (row.level ?? row.Level ?? '') || '');
+                const rowRoom = String(row && (row.room ?? row.Room ?? '') || '').trim();
+                const status = String(row && (row.status ?? row.Status ?? '') || '').toLowerCase();
+                if (rowSubject === subject && rowLevel === level && rowRoom && rowRoom !== currentRoom && status !== 'inactive') rows.push(rowRoom);
+            };
+            const db = typeof DATA_CONTROLLER !== 'undefined' ? DATA_CONTROLLER.db : null;
+            (db && Array.isArray(db.combos) ? db.combos : []).forEach(add);
+            (db && Array.isArray(db.teacherClasses) ? db.teacherClasses : []).forEach(add);
+            return [...new Set(rows)].sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+        };
+        const renderAssignmentTargetRooms = () => {
+            const wrap = document.getElementById('asn-multi-room-wrap');
+            const list = document.getElementById('asn-multi-room-list');
+            const toggle = document.getElementById('asn-multi-room');
+            if (!wrap || !list || !toggle) return;
+            const rooms = getAssignmentTargetRooms();
+            wrap.classList.toggle('hidden', rooms.length === 0);
+            list.classList.toggle('hidden', !toggle.checked || rooms.length === 0);
+            if (!rooms.length) { list.innerHTML = ''; return; }
+            list.innerHTML = `<label class="col-span-2 flex items-center gap-2 text-[11px] text-cyan-800 cursor-pointer"><input type="checkbox" id="asn-multi-room-all" class="accent-cyan-600"> เลือกทุกห้อง</label>` + rooms.map(room => `<label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer"><input type="checkbox" class="asn-target-room accent-cyan-600" value="${room}"> ห้อง ${room}</label>`).join('');
+            const all = document.getElementById('asn-multi-room-all');
+            if (all) all.addEventListener('change', () => list.querySelectorAll('.asn-target-room').forEach(input => { input.checked = all.checked; }));
+        };
+        const selectedAssignmentTargetRooms = () => [...document.querySelectorAll('#asn-multi-room-list .asn-target-room:checked')].map(input => String(input.value || '').trim()).filter(Boolean);
+
         const openAddModal = () => {
             if(!els.filters.subject.value) return Swal.fire('เตือน', 'กรุณาเลือกวิชาก่อน', 'warning');
             if(!els.filters.level.value || !els.filters.room.value) return Swal.fire('เตือน', 'กรุณาเลือกวิชา ระดับชั้น และห้องเรียนก่อน', 'warning');
             
-            document.getElementById('assignment-form').reset(); 
-            document.getElementById('asn-id').value = ''; 
-            document.getElementById('asn-modal-title').innerText = 'เพิ่มงานใหม่'; 
+            document.getElementById('assignment-form').reset();
+            document.getElementById('asn-id').value = '';
+            document.getElementById('asn-modal-title').innerText = 'เพิ่มงานใหม่';
             var btnDel = document.getElementById('btn-asn-delete'); if(btnDel) btnDel.classList.add('hidden');
+            const multiRoomToggle = document.getElementById('asn-multi-room');
+            if (multiRoomToggle && !multiRoomToggle.dataset.bound) {
+                multiRoomToggle.addEventListener('change', renderAssignmentTargetRooms);
+                multiRoomToggle.dataset.bound = '1';
+            }
+            renderAssignmentTargetRooms();
             
             const subjOpt = els.filters.subject.selectedIndex !== -1 ? els.filters.subject.options[els.filters.subject.selectedIndex] : null;
             const subjName = subjOpt ? subjOpt.text : '';
@@ -3633,8 +3678,9 @@
             document.getElementById('asn-type').value = asn.type; 
             document.getElementById('asn-max').value = asn.maxScore; 
             document.getElementById('asn-due').value = asn.dueDate; 
-            document.getElementById('asn-modal-title').innerText = 'แก้ไขงาน'; 
+            document.getElementById('asn-modal-title').innerText = 'แก้ไขงาน';
             var btnDel = document.getElementById('btn-asn-delete'); if(btnDel) btnDel.classList.remove('hidden');
+            var multiRoom = document.getElementById('asn-multi-room-wrap'); if (multiRoom) multiRoom.classList.add('hidden');
             const subjOpt = els.filters.subject.selectedIndex !== -1 ? els.filters.subject.options[els.filters.subject.selectedIndex] : null;
             const subjName = subjOpt ? subjOpt.text : '';
             document.getElementById('asn-context-info').innerText = `${subjName} (${els.filters.level.value}/${els.filters.room.value})`;
@@ -3642,6 +3688,7 @@
         };
 
         let copySourceRows = [];
+        let copyAssignmentsHydratedKey = '';
         const copyField = (a, lower, upper, fallback = '') => a && (a[lower] ?? a[upper] ?? fallback);
         const copySignature = (a) => [copyField(a, 'title', 'Title'), copyField(a, 'type', 'Type', 'Score'), Number(copyField(a, 'maxScore', 'MaxScore', 0)), copyField(a, 'dueDate', 'DueDate')].map(v => String(v ?? '').trim()).join('|');
         const getCopyAssignments = () => {
@@ -3661,10 +3708,40 @@
         };
         const refreshCopySourceAssignments = () => renderCopySourceAssignments();
         const toggleCopySelection = checked => document.querySelectorAll('#copy-source-assignments .copy-assignment-checkbox:not(:disabled)').forEach(cb => { cb.checked = checked; });
-        const openCopyAssignmentsModal = () => {
+        const hydrateCopyAssignments = async () => {
+            const targetTerm = normalizeTermForUI(state.filter.term || window.CURRENT_SERVER_TERM || '');
+            const key = [targetTerm, els.filters.subject.value, els.filters.level.value].join('|');
+            if (copyAssignmentsHydratedKey === key) return;
+            if (!window.classroomRepository || typeof window.classroomRepository.getAllowedScopes !== 'function') return;
+            const result = await window.classroomRepository.getAllowedScopes({
+                termId: targetTerm,
+                term: targetTerm,
+                subjectCode: els.filters.subject.value,
+                level: els.filters.level.value,
+                room: els.filters.room.value,
+                user: CURRENT_USER
+            });
+            const rows = result && result.data && Array.isArray(result.data.assignments) ? result.data.assignments : [];
+            if (rows.length && typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
+                const merged = new Map(getCopyAssignments().map(a => [String(copyField(a, 'id', 'AssignmentID', '')), a]));
+                rows.forEach(row => {
+                    const id = String(copyField(row, 'id', 'AssignmentID', ''));
+                    if (id) merged.set(id, row);
+                });
+                DATA_CONTROLLER.db.assignments = [...merged.values()];
+                DATA_CONTROLLER.saveToStorage();
+            }
+            copyAssignmentsHydratedKey = key;
+        };
+        const openCopyAssignmentsModal = async () => {
             const subject = els.filters.subject.value, level = els.filters.level.value, room = els.filters.room.value;
             if (!subject || !level || !room) return Swal.fire('เตือน', 'กรุณาเลือกวิชา ระดับชั้น และห้องเรียนก่อน', 'warning');
             const targetTerm = normalizeTermForUI(state.filter.term || window.CURRENT_SERVER_TERM || '');
+            try {
+                await hydrateCopyAssignments();
+            } catch (error) {
+                console.warn('COPY_ASSIGNMENTS_SOURCE_READ_FAILED', error && error.message ? error.message : error);
+            }
             const all = getCopyAssignments().filter(a => String(copyField(a, 'subjectCode', 'SubjectCode', copyField(a, 'subject', 'Subject', ''))) === String(subject) && String(copyField(a, 'level', 'Level')) === String(level) && String(copyField(a, 'room', 'Room')) !== String(room) && normalizeTermForUI(copyField(a, 'term', 'Term', targetTerm)) === targetTerm);
             const rooms = [...new Set(all.map(a => String(copyField(a, 'room', 'Room', '')).trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'th')); const select = document.getElementById('copy-source-room');
             select.innerHTML = rooms.length ? rooms.map(r => `<option value="${r}">ห้อง ${r}</option>`).join('') : '<option value="">ไม่พบห้องต้นทาง</option>';
@@ -3689,35 +3766,48 @@
             const shortTitle = document.getElementById('asn-title').value;
             const fullDesc = document.getElementById('asn-desc').value;
             const combinedTitle = fullDesc ? `${shortTitle}:::${fullDesc}` : shortTitle;
-            const payload = { 
-                id: id, title: combinedTitle, type: document.getElementById('asn-type').value, 
-                maxScore: document.getElementById('asn-max').value, dueDate: document.getElementById('asn-due').value, 
+            const payload = {
+                id: id, title: combinedTitle, type: document.getElementById('asn-type').value,
+                maxScore: document.getElementById('asn-max').value, dueDate: document.getElementById('asn-due').value,
                 subject: els.filters.subject.value, level: els.filters.level.value, room: els.filters.room.value, term: term, user: CURRENT_USER
             };
-            const existingIdx = state.assignments.findIndex(a => a.id === id);
-            if (existingIdx > -1) { 
-                state.assignments[existingIdx] = { ...state.assignments[existingIdx], ...payload };
-            } 
-            else { 
-                state.assignments.push(payload);
-            }
-
-            // [FIX] อัปเดตข้อมูลลง DATA_CONTROLLER.db ทันที เพื่อไม่ให้ข้อมูลหายตอนเปลี่ยนห้องหลัง Sync เสร็จ
-            if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
-                if (!DATA_CONTROLLER.db.assignments) DATA_CONTROLLER.db.assignments = [];
-                const dbIdx = DATA_CONTROLLER.db.assignments.findIndex(a => a.id === id);
-                if (dbIdx > -1) {
-                    DATA_CONTROLLER.db.assignments[dbIdx] = { ...DATA_CONTROLLER.db.assignments[dbIdx], ...payload };
-                } else {
-                    DATA_CONTROLLER.db.assignments.push(payload);
+            const isNewAssignment = !idInput;
+            const targetRooms = isNewAssignment && document.getElementById('asn-multi-room')?.checked
+                ? [payload.room, ...selectedAssignmentTargetRooms()]
+                : [payload.room];
+            const payloads = targetRooms.map((room, index) => ({
+                ...payload,
+                id: index === 0 ? payload.id : `new_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${index}`,
+                room
+            }));
+            const created = [];
+            let skipped = 0;
+            payloads.forEach((item, index) => {
+                const signature = copySignature(item);
+                const hasSameColumn = index > 0 && getCopyAssignments().some(existing =>
+                    String(copyField(existing, 'subjectCode', 'SubjectCode', copyField(existing, 'subject', 'Subject', ''))) === String(item.subject) &&
+                    String(copyField(existing, 'level', 'Level')) === String(item.level) &&
+                    String(copyField(existing, 'room', 'Room')) === String(item.room) &&
+                    copySignature(existing) === signature
+                );
+                if (hasSameColumn) { skipped += 1; return; }
+                const existingIdx = state.assignments.findIndex(a => String(a.id) === String(item.id));
+                if (existingIdx > -1) state.assignments[existingIdx] = { ...state.assignments[existingIdx], ...item };
+                else if (index === 0) state.assignments.push(item);
+                if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) {
+                    if (!DATA_CONTROLLER.db.assignments) DATA_CONTROLLER.db.assignments = [];
+                    const dbIdx = DATA_CONTROLLER.db.assignments.findIndex(a => String(copyField(a, 'id', 'AssignmentID', '')) === String(item.id));
+                    if (dbIdx > -1) DATA_CONTROLLER.db.assignments[dbIdx] = { ...DATA_CONTROLLER.db.assignments[dbIdx], ...item };
+                    else DATA_CONTROLLER.db.assignments.push(item);
                 }
-                DATA_CONTROLLER.saveToStorage();
-            }
-
+                created.push(item);
+            });
+            if (typeof DATA_CONTROLLER !== 'undefined' && DATA_CONTROLLER.db) DATA_CONTROLLER.saveToStorage();
             renderTable(); renderStats();
             closeModal('assignment-modal');
-            Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', text: 'ระบบกำลังส่งข้อมูลเบื้องหลัง', timer: 1000, showConfirmButton: false });
-            SYNC_ENGINE.enqueue('ASSIGNMENT', payload);
+            created.forEach(item => SYNC_ENGINE.enqueue('ASSIGNMENT', item));
+            const skippedText = skipped ? ` ข้าม ${skipped} ห้องที่มีคอลัมน์ซ้ำแล้ว` : '';
+            Swal.fire({ icon: 'success', title: `สร้างคอลัมน์แล้ว ${created.length} ห้อง`, text: `ระบบกำลังส่งเฉพาะโครงสร้างคอลัมน์${skippedText}`, timer: 1800, showConfirmButton: false });
         };
 
         const handleDeleteAssignment = () => {
