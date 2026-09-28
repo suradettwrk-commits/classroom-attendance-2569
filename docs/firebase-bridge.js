@@ -1125,7 +1125,7 @@
           updates[`scores/${firebaseKey(key)}`] = { ScoreID: key, AssignmentID: `__GRADE_${component}`, TeacherClassID: teacherClassId, SubjectCode: subjectCode, Level: level, Room: room, StudentID: studentId, Score: value, IsSubmitted: value !== '' ? 1 : 0, TermID: canonicalTermId(term, root), Term: term, Timestamp: new Date().toISOString() };
         });
       });
-      if (conflicts.length) return { success: false, conflict: true, conflicts, message: `พบข้อมูลถูกแก้ไขจากอุปกรณ์อื่น ${conflicts.length} ช่อง จึงไม่เขียนทับข้อมูลเดิม` };
+      if (conflicts.length) return { success: false, conflict: true, conflicts, message: `ค่าคะแนนในฐานข้อมูลเปลี่ยนระหว่างการกรอก ${conflicts.length} ช่อง จึงยังไม่เขียนทับข้อมูลเดิม` };
       const settingKey = [term, subjectCode, level, room].join('|');
       updates[`settings/${firebaseKey(`grading_${settingKey}`)}`] = { Key: `grading_${settingKey}`, TermID: canonicalTermId(term, root), WeightPre: weights[0], WeightMid: weights[1], WeightPost: weights[2], WeightFinal: weights[3], GoalPercent: goalPercent, UpdatedAt: new Date().toISOString() };
       await db.ref('/').update(updates);
@@ -1160,7 +1160,7 @@
           }
         });
       });
-      if (conflicts.length) return { success: false, conflict: true, conflicts, message: `พบข้อมูลถูกแก้ไขจากอุปกรณ์อื่น ${conflicts.length} ช่อง จึงไม่เขียนทับข้อมูลเดิม` };
+      if (conflicts.length) return { success: false, conflict: true, conflicts, message: `ค่าคะแนนในฐานข้อมูลเปลี่ยนระหว่างการกรอก ${conflicts.length} ช่อง จึงยังไม่เขียนทับข้อมูลเดิม` };
       if (Object.keys(updates).length) await db.ref('/').update(updates);
       snapshotPromise = null;
       return { success: true, saved: Object.keys(updates).length };

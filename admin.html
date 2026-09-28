@@ -7694,6 +7694,16 @@
     function updateNativeRowCalculations(row, sid) { const total = nativeGradeTotal(sid); const grade = nativeGradeLabel(total); const att = nativeOptionalGradeValue(sid,'att',nativeAutoAtt(total)); const read = nativeOptionalGradeValue(sid,'read',nativeAutoRead(total)); const totalEl = row.querySelector('.native-total-cell'); const gradeEl = row.querySelector('.native-grade-cell'); const attEl = row.querySelector('.native-att-cell'); const readEl = row.querySelector('.native-read-cell'); if (totalEl) { totalEl.textContent = total.toFixed(2); totalEl.className = `p-2 text-center font-bold native-total-cell ${nativeTotalClass(total)}`; } if (gradeEl) { gradeEl.textContent = grade; gradeEl.className = `p-2 text-center font-extrabold native-grade-cell ${nativeGradeClass(grade)}`; } if (attEl) attEl.textContent = att; if (readEl) readEl.textContent = read; renderNativeGradingSummary(window.NATIVE_GRADING.data); }
     function nativeGradingPaste(e) { const text = (e.clipboardData || window.clipboardData).getData('text'); if (!text.includes('\n') && !text.includes('\t')) return; e.preventDefault(); const start = e.target, rows = [...getEl('grading-native-body').querySelectorAll('tr[data-grade-row]')], rowIndex = rows.indexOf(start.closest('tr')), colInputs = [...start.closest('tr').querySelectorAll('.grade-native-input')], colIndex = colInputs.indexOf(start); const matrix = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n'); if (matrix.length && matrix[matrix.length - 1].trim() === '') matrix.pop(); matrix.forEach((line, r) => line.split('\t').forEach((raw, c) => { const target = rows[rowIndex + r]?.querySelectorAll('.grade-native-input')[colIndex + c]; if (!target) return; const value = raw.trim(), component = target.dataset.gradeComponent, max = Number(getEl(`grading-w-${component}`)?.value) || 100; if (value !== '' && (!/^\d*(\.\d+)?$/.test(value) || Number(value) > max)) return; const sid = target.dataset.gradeStudent; setNativeGradingDirty(sid, component, value); })); nativeRemember(); scheduleNativeGradingAutosave(); renderNativeGradingTable(window.NATIVE_GRADING.data); }
     function gradingHasPendingEdits() { const grading = window.NATIVE_GRADING; return !!(Object.keys(grading.dirty || {}).length || grading.settingsDirty || grading.saving); }
+    function rebaseNativeGradingConflicts(conflicts) {
+        const grading = window.NATIVE_GRADING;
+        (conflicts || []).forEach(conflict => {
+            const sid = String(conflict.studentId || ''), component = String(conflict.component || '');
+            if (!sid || !component) return;
+            grading.base[sid] = grading.base[sid] || {};
+            grading.base[sid][component] = conflict.actual ?? '';
+            if (grading.data?.exams?.[sid]) grading.data.exams[sid][component] = conflict.actual ?? '';
+        });
+    }
     function loadNativeGradingData(forceServer = false) {
         const grading = window.NATIVE_GRADING; if (gradingHasPendingEdits()) return gradingSetStatus('มีข้อมูลตัดเกรดที่ยังบันทึกไม่เสร็จ กรุณารอหรือบันทึกให้เสร็จก่อนโหลดใหม่', 'error');
         populateNativeGradingFilters(); const filter = gradingCurrentFilter(); const requestSeq = ++grading.loadSeq; const revisionAtRequest = grading.revision || 0;
@@ -7762,7 +7772,13 @@
         google.script.run.withSuccessHandler(res => {
             if (!res || !res.success) {
                 const details = (res?.conflicts || []).slice(0, 8).map(x => `รหัส ${x.studentId} ช่อง ${x.component} (เดิม ${x.expected === '' ? 'ว่าง' : x.expected}, ปัจจุบัน ${x.actual === '' ? 'ว่าง' : x.actual})`).join(' | ');
-                return fail((res?.message || 'บันทึกไม่สำเร็จ') + (details ? `: ${details}` : ''), !res?.conflict);
+                if (res?.conflict) {
+                    rebaseNativeGradingConflicts(res.conflicts);
+                    finish();
+                    gradingSetStatus(`ค่าคะแนนในฐานข้อมูลเปลี่ยนระหว่างการกรอก จึงยังไม่เขียนทับข้อมูลเดิม${details ? `: ${details}` : ''} กรุณาตรวจสอบค่าที่กรอก แล้วกดบันทึกอีกครั้ง`, 'error');
+                    return;
+                }
+                return fail((res?.message || 'บันทึกไม่สำเร็จ') + (details ? `: ${details}` : ''), true);
             }
             const changedDuringSave = continueLatest();
             finish(); grading.retryCount = 0;
