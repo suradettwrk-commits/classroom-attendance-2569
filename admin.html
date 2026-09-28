@@ -7501,6 +7501,7 @@
     function nativeAutoRead(total) { return total >= 70 ? '3' : total >= 55 ? '2' : '1'; }
     function nativeScoreClass(value, max) {
         const number = Number(value), limit = Number(max) || 0;
+        if (Number.isFinite(number) && limit > 0 && number > limit) return 'bg-rose-200 text-rose-900 border-rose-500 ring-2 ring-rose-500';
         if (value === '' || value == null || !Number.isFinite(number) || number === 0) return 'bg-rose-50 text-rose-700 border-rose-200';
         return number < limit * 0.5 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200';
     }
