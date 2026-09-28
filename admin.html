@@ -7512,7 +7512,7 @@
         if (!students.length) return gradingSetStatus('กรุณาโหลดข้อมูลตัดเกรดก่อนคัดลอกสรุปโรงเรียน', 'info');
         const filter = gradingCurrentFilter(), text = value => String(value == null ? '' : value).trim();
         const subjectCode = text(filter.subject), selected = getEl('grading-subject')?.selectedOptions?.[0];
-        const subjectName = text(data.subjectName || data.subject_name || data.subjectTitle || selected?.textContent || '').replace(new RegExp('^' + subjectCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*'), '').trim();
+        const subjectName = text(data.subjectName || data.subject_name || data.subjectTitle || selected?.textContent || '').replace(new RegExp('^' + subjectCode.replace(/[.*+?^${}()|[\]\\]/g, match => '\\' + match) + '\\s*'), '').trim();
         const sources = [].concat(window.SUBJECTS_CACHE || [], window.__SHARED_SUBJECTS || [], window.ADMIN_SETTINGS_BOOTSTRAP?.subjects || []);
         const subjectMeta = sources.map(normalizeSubjectRecord).find(x => text(x.code) === subjectCode) || {};
         const credit = ['credit', 'credits', 'Credit', 'Credits', 'unit', 'units', 'Unit', 'Units', 'หน่วยกิต'].map(k => subjectMeta[k]).find(v => text(v) !== '') || selected?.dataset?.credit || '';
@@ -7560,7 +7560,7 @@
         const totals = students.map(totalOf), numericTotals = totals.filter(Number.isFinite), selected = useCurrent ? getEl('grading-subject')?.selectedOptions?.[0] : null, code = text(filter.subject);
         const sources = [].concat(window.SUBJECTS_CACHE || [], window.__SHARED_SUBJECTS || [], window.ADMIN_SETTINGS_BOOTSTRAP?.subjects || []);
         const meta = sources.map(normalizeSubjectRecord).find(x => text(x.code) === code) || {};
-        const selectedLabel = text(selected?.textContent || '').replace(new RegExp('^' + code.replace(/[\^$.*+?()[\]{}|]/g, '\\$&') + '\\s*'), '').trim();
+        const selectedLabel = text(selected?.textContent || '').replace(new RegExp('^' + code.replace(/[\^$.*+?()[\]{}|]/g, match => '\\' + match) + '\\s*'), '').trim();
         const subjectName = text(data?.subjectName || data?.subject_name || data?.subjectTitle || meta.name || selectedLabel);
         const credit = ['credit','credits','Credit','Credits','unit','units','Unit','Units','หน่วยกิต'].map(k => meta[k]).find(v => text(v)) || selected?.dataset?.credit || '';
         const teacher = text(CURRENT_USER?.name || CURRENT_USER?.displayName || CURRENT_USER?.fullName || [CURRENT_USER?.prefix,CURRENT_USER?.firstName,CURRENT_USER?.lastName].filter(Boolean).join(' '));
