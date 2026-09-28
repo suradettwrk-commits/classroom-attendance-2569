@@ -7554,7 +7554,7 @@
         return new Promise((resolve, reject) => { try { google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getGradingData({ ...filter, user: CURRENT_USER }); } catch (error) { reject(error); } });
     }
     function nativeSchoolSummaryBuildRow(data, filter, useCurrent) {
-        const text = value => String(value == null ? '' : value).trim(), students = data?.students || [], exams = data?.exams || {};
+        const text = value => String(value == null ? '' : value).trim(), sourceStudents = data?.students || [], seenStudentIds = new Set(), students = sourceStudents.filter(student => { const id = text(student?.id ?? student?.studentId ?? student?.StudentID); if (!id || seenStudentIds.has(id)) return false; seenStudentIds.add(id); return true; }), exams = data?.exams || {};
         const valueOf = (student, key) => useCurrent ? nativeGradeValue(student.id, key) : (exams[String(student.id)] || exams[student.id] || {})[key] ?? '';
         const totalOf = student => ['pre','mid','post','final'].reduce((sum, key) => sum + (Number(valueOf(student, key)) || 0), 0);
         const totals = students.map(totalOf), numericTotals = totals.filter(Number.isFinite), selected = useCurrent ? getEl('grading-subject')?.selectedOptions?.[0] : null, code = text(filter.subject);
