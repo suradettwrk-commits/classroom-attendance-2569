@@ -3457,6 +3457,7 @@ var DATA_CONTROLLER = new DataController();
                     <button onclick="loadNativeGradingData()" class="btn-blue-secondary px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>โหลดข้อมูล</button>
                     <button onclick="toggleNativeGradingAssignments()" id="grading-raw-toggle" class="bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-list-check mr-1"></i>แสดงคะแนนงาน</button>
                     <button onclick="openNativeSGSModal()" class="bg-pink-50 text-pink-700 border border-pink-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-table-list mr-1"></i>ข้อมูลลง SGS</button>
+                    <button onclick="copyNativeSchoolGradeSummary()" class="bg-cyan-50 text-cyan-700 border border-cyan-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-school mr-1"></i>คัดลอกสรุปกรอกโรงเรียน</button>
                     <button type="button" onclick="printNativeGrading()" class="bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold"><i class="fa-solid fa-print mr-1"></i>พิมพ์ตัดเกรด</button>
                     <button onclick="saveNativeGradingData()" id="grading-save-btn" class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow"><i class="fa-solid fa-floppy-disk mr-1"></i>บันทึกเกรด</button>
                 </div>
@@ -10284,6 +10285,30 @@ var DATA_CONTROLLER = new DataController();
         const data = window.NATIVE_GRADING.data; if (!data?.students?.length) return gradingSetStatus('กรุณาโหลดข้อมูลก่อนคัดลอก', 'info');
         const rows = data.students.map(s => `${s.no}\t${s.id}\t${s.name}\t${kind === 'grade' ? nativeGradeLabel(nativeGradeTotal(s.id)) : nativeGradeTotal(s.id).toFixed(2)}`);
         navigator.clipboard?.writeText(rows.join('\n')).then(() => gradingSetStatus(`คัดลอก${kind === 'grade' ? 'เกรด' : 'คะแนนรวม'} ${rows.length} รายการแล้ว วางใน Excel ได้เลย`, 'success')).catch(() => gradingSetStatus('เบราว์เซอร์ไม่อนุญาตการคัดลอก กรุณาอนุญาต Clipboard', 'error'));
+    }
+    function copyNativeSchoolGradeSummary() {
+        const grading = window.NATIVE_GRADING, data = grading.data, students = data?.students || [];
+        if (!students.length) return gradingSetStatus('กรุณาโหลดข้อมูลตัดเกรดก่อนคัดลอกสรุปโรงเรียน', 'info');
+        const filter = gradingCurrentFilter(), text = value => String(value == null ? '' : value).trim();
+        const subjectCode = text(filter.subject), selected = getEl('grading-subject')?.selectedOptions?.[0];
+        const subjectName = text(data.subjectName || data.subject_name || data.subjectTitle || selected?.textContent || '').replace(new RegExp('^' + subjectCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*'), '').trim();
+        const sources = [].concat(window.SUBJECTS_CACHE || [], window.__SHARED_SUBJECTS || [], window.ADMIN_SETTINGS_BOOTSTRAP?.subjects || []);
+        const subjectMeta = sources.map(normalizeSubjectRecord).find(x => text(x.code) === subjectCode) || {};
+        const credit = ['credit', 'credits', 'Credit', 'Credits', 'unit', 'units', 'Unit', 'Units', 'หน่วยกิต'].map(k => subjectMeta[k]).find(v => text(v) !== '') || selected?.dataset?.credit || '';
+        const teacher = text(CURRENT_USER?.name || CURRENT_USER?.displayName || CURRENT_USER?.fullName || [CURRENT_USER?.prefix, CURRENT_USER?.firstName, CURRENT_USER?.lastName].filter(Boolean).join(' '));
+        const room = [text(filter.level), text(filter.room)].filter(Boolean).join('/');
+        const totals = students.map(s => nativeGradeTotal(s.id)), numericTotals = totals.filter(Number.isFinite);
+        const countGrades = {'4':0,'3.5':0,'3':0,'2.5':0,'2':0,'1.5':0,'1':0,'0':0,'ร':0,'มส':0,'มผ':0};
+        const countCategory = (key, fallback, labels) => { const out = {'ดีเยี่ยม':0,'ดี':0,'ผ่าน':0,'ไม่ผ่าน':0}; students.forEach(s => { const raw = text(nativeGradeValue(s.id, key) || fallback(s)); const normalized = raw.toLowerCase(); const label = labels[normalized] || (raw.includes('ดีเยี่ยม') ? 'ดีเยี่ยม' : raw.includes('ไม่ผ่าน') ? 'ไม่ผ่าน' : raw.includes('ดี') ? 'ดี' : raw.includes('ผ่าน') ? 'ผ่าน' : 'ไม่ผ่าน'); out[label]++; }); return out; };
+        students.forEach(s => { const exam = data.exams?.[s.id] || {}, special = text(exam.gradeStatus || exam.result || exam.status || exam.grade); const label = ['ร','มส','มผ'].includes(special) ? special : (['4','3.5','3','2.5','2','1.5','1','0'].includes(special) ? special : nativeGradeLabel(nativeGradeTotal(s.id))); countGrades[label] = (countGrades[label] || 0) + 1; });
+        const att = countCategory('att', s => nativeAutoAtt(nativeGradeTotal(s.id)), {'3':'ดีเยี่ยม','2':'ดี','1':'ผ่าน','0':'ไม่ผ่าน'}), read = countCategory('read', s => nativeAutoRead(nativeGradeTotal(s.id)), {'3':'ดีเยี่ยม','2':'ดี','1':'ผ่าน','0':'ไม่ผ่าน'});
+        const headers = ['ชื่อครูผู้สอน','รหัสวิชา','ชื่อวิชา','หน่วยกิต','ห้อง','นักเรียนทั้งหมด','คะแนนสูงสุด','คะแนนต่ำสุด','4','3.5','3','2.5','2','1.5','1','0','ร','มส','มผ','คุณลักษณะ_ดีเยี่ยม','คุณลักษณะ_ดี','คุณลักษณะ_ผ่าน','คุณลักษณะ_ไม่ผ่าน','อ่านคิด_ดีเยี่ยม','อ่านคิด_ดี','อ่านคิด_ผ่าน','อ่านคิด_ไม่ผ่าน','สถานะเช็คยอด_เกรด','สถานะเช็คยอด_คุณลักษณะ','สถานะเช็คยอด_อ่านคิด'];
+        const complete = (counts, total) => Object.values(counts).reduce((a,b) => a + b, 0) === total ? 'ครบ' : 'ยังไม่ครบ';
+        const row = [teacher, subjectCode, subjectName, credit, room, students.length, numericTotals.length ? Math.max(...numericTotals) : '', numericTotals.length ? Math.min(...numericTotals) : '', ...['4','3.5','3','2.5','2','1.5','1','0','ร','มส','มผ'].map(k => countGrades[k]), att['ดีเยี่ยม'],att['ดี'],att['ผ่าน'],att['ไม่ผ่าน'],read['ดีเยี่ยม'],read['ดี'],read['ผ่าน'],read['ไม่ผ่าน'],complete(countGrades, students.length),complete(att, students.length),complete(read, students.length)];
+        const tsv = [headers, row].map(values => values.map(value => text(value).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+        const done = () => gradingSetStatus(`คัดลอกสรุปกรอกโรงเรียนแล้ว 1 แถว · ${subjectCode} ${room} · นักเรียน ${students.length} คน`, 'success');
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(tsv).then(done).catch(() => { const area = document.createElement('textarea'); area.value = tsv; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); done(); });
+        else { const area = document.createElement('textarea'); area.value = tsv; document.body.appendChild(area); area.select(); document.execCommand('copy'); document.body.removeChild(area); done(); }
     }
     function nativeAutoAtt(total) { return total >= 65 ? '3' : total >= 55 ? '2' : '1'; }
     function nativeAutoRead(total) { return total >= 70 ? '3' : total >= 55 ? '2' : '1'; }
